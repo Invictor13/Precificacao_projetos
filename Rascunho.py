@@ -2,6 +2,7 @@ import sqlite3
 import tkinter as tk
 from tkinter import ttk, messagebox
 from datetime import datetime
+import customtkinter as ctk
 
 # --- CONFIGURAÇÃO INICIAL E BANCO DE DADOS ---
 
@@ -23,7 +24,7 @@ class Database:
                 lucro_padrao REAL
             )
         """)
-        
+
         # Tabela de Catálogo de Serviços (NOVIDADE)
         self.cursor.execute("""
             CREATE TABLE IF NOT EXISTS catalogo_servicos (
@@ -32,7 +33,7 @@ class Database:
                 horas_padrao REAL
             )
         """)
-        
+
         # Tabela de Projetos
         self.cursor.execute("""
             CREATE TABLE IF NOT EXISTS projetos (
@@ -114,12 +115,27 @@ class Database:
         self.cursor.execute("DELETE FROM catalogo_servicos WHERE id=?", (id_servico,))
         self.conn.commit()
 
+    def get_dashboard_metrics(self):
+        self.cursor.execute("SELECT COUNT(*), SUM(preco_final) FROM projetos")
+        data = self.cursor.fetchone()
+
+        total_projetos = data[0] if data[0] else 0
+        total_orcado = data[1] if data[1] else 0.0
+
+        ticket_medio = total_orcado / total_projetos if total_projetos > 0 else 0.0
+
+        return {
+            "total_projetos": total_projetos,
+            "total_orcado": total_orcado,
+            "ticket_medio": ticket_medio
+        }
+
 # --- LÓGICA DE NEGÓCIO ---
 
 class CalculadoraPreco:
     def __init__(self, db):
         self.db = db
-    
+
     def calcular_hora_tecnica(self):
         cfg = self.db.get_config()
         custo_mensal = cfg[1]
@@ -133,12 +149,12 @@ class CalculadoraPreco:
         valor_hora = self.calcular_hora_tecnica()
 
         custo_producao = (horas_totais * valor_hora) + custos_extras
-        valor_impostos = custo_producao * imposto_pct 
+        valor_impostos = custo_producao * imposto_pct
         base_com_imposto = custo_producao + valor_impostos
         preco_final = base_com_imposto * (1 + lucro_pct)
-        
+
         lucro_valor = preco_final - base_com_imposto
-        
+
         return {
             "valor_hora": valor_hora,
             "custo_producao": custo_producao,
@@ -149,79 +165,131 @@ class CalculadoraPreco:
 
 # --- INTERFACE GRÁFICA (GUI) ---
 
-class App(tk.Tk):
+ctk.set_appearance_mode("System")
+ctk.set_default_color_theme("blue")
+
+class App(ctk.CTk):
     def __init__(self):
         super().__init__()
         self.title("Okami Project Manager 2.0 - Local")
         self.geometry("1000x650")
         self.db = Database()
         self.calc = CalculadoraPreco(self.db)
-        
-        # Estilo
+
+        # Estilo Treeview (Dark Mode Compat)
         style = ttk.Style()
-        style.theme_use('clam')
-        style.configure("TFrame", background="#f0f0f0")
-        style.configure("TButton", padding=6)
-        style.configure("Treeview", rowheight=25)
+        style.theme_use("clam")
 
-        # Abas
-        self.notebook = ttk.Notebook(self)
-        self.notebook.pack(fill='both', expand=True, padx=10, pady=10)
+        # Estilo do Corpo da Tabela
+        style.configure("Treeview",
+                        background="#2b2b2b",
+                        foreground="white",
+                        rowheight=30,
+                        fieldbackground="#2b2b2b",
+                        borderwidth=0)
+        style.map('Treeview', background=[('selected', '#1f6aa5')])
 
+        # Estilo do Cabeçalho
+        style.configure("Treeview.Heading",
+                        background="#1f2630",
+                        foreground="white",
+                        relief="flat",
+                        font=('Segoe UI', 10, 'bold'))
+        style.map("Treeview.Heading",
+                    background=[('active', '#10141a')])
+
+        # Container Principal (Tabview)
+        self.tabview = ctk.CTkTabview(self)
+        self.tabview.pack(fill="both", expand=True, padx=10, pady=10)
+
+        self.tabview.add("Home")
+        self.tabview.add("Meus Projetos")
+        self.tabview.add("Novo Orçamento")
+        self.tabview.add("Catálogo")
+        self.tabview.add("Config. Financeira")
+
+        # Inicialização das Telas
+        self.create_tab_home()
         self.create_tab_projetos()
         self.create_tab_novo_orcamento()
-        self.create_tab_catalogo() # Nova Aba
+        self.create_tab_catalogo()
         self.create_tab_config()
+
+    def create_tab_home(self):
+        tab = self.tabview.tab("Home")
+
+        # Título
+        ctk.CTkLabel(tab, text="Visão Geral do Negócio", font=("Segoe UI", 24, "bold")).pack(pady=20)
+
+        # Container de Métricas
+        metrics_frame = ctk.CTkFrame(tab, fg_color="transparent")
+        metrics_frame.pack(fill="x", padx=20)
+
+        # Dados
+        metrics = self.db.get_dashboard_metrics()
+
+        # Cards
+        self.create_metric_card(metrics_frame, "Total Orçado", f"R$ {metrics['total_orcado']:.2f}", "#1F6AA5", 0)
+        self.create_metric_card(metrics_frame, "Projetos na Base", f"{metrics['total_projetos']}", "#2CC985", 1)
+        self.create_metric_card(metrics_frame, "Ticket Médio", f"R$ {metrics['ticket_medio']:.2f}", "#E67E22", 2)
+
+    def create_metric_card(self, parent, title, value, color, col_idx):
+        card = ctk.CTkFrame(parent, fg_color=color, corner_radius=15)
+        card.grid(row=0, column=col_idx, padx=10, pady=10, sticky="ew")
+        parent.grid_columnconfigure(col_idx, weight=1)
+
+        ctk.CTkLabel(card, text=title, text_color="white", font=("Segoe UI", 14)).pack(pady=(15, 0))
+        ctk.CTkLabel(card, text=value, text_color="white", font=("Segoe UI", 22, "bold")).pack(pady=(5, 20))
 
     # --- ABA 1: MEUS PROJETOS ---
     def create_tab_projetos(self):
-        frame = ttk.Frame(self.notebook)
-        self.notebook.add(frame, text="Meus Projetos")
-        
+        frame = self.tabview.tab("Meus Projetos")
+
         columns = ("id", "cliente", "status", "preco")
         self.tree_proj = ttk.Treeview(frame, columns=columns, show='headings')
         self.tree_proj.heading("id", text="#")
         self.tree_proj.heading("cliente", text="Cliente")
         self.tree_proj.heading("status", text="Status")
         self.tree_proj.heading("preco", text="Preço Final")
-        
+
         self.tree_proj.column("id", width=50)
         self.tree_proj.pack(fill='both', expand=True, padx=10, pady=10)
-        
-        ttk.Button(frame, text="Atualizar Lista", command=self.refresh_projetos).pack(pady=5)
+
+        ctk.CTkButton(frame, text="🔄 Atualizar Lista", command=self.refresh_projetos,
+                      fg_color="#34495E").pack(pady=10)
         self.refresh_projetos()
 
     # --- ABA 2: NOVO ORÇAMENTO ---
     def create_tab_novo_orcamento(self):
-        self.frame_orc = ttk.Frame(self.notebook)
-        self.notebook.add(self.frame_orc, text="Novo Orçamento")
+        tab = self.tabview.tab("Novo Orçamento")
 
         # Topo: Dados do Cliente
-        frame_top = ttk.Frame(self.frame_orc)
+        frame_top = ctk.CTkFrame(tab, fg_color="transparent")
         frame_top.pack(fill='x', padx=20, pady=10)
 
-        ttk.Label(frame_top, text="Cliente:").pack(side='left')
-        self.entry_cliente = ttk.Entry(frame_top, width=30)
-        self.entry_cliente.pack(side='left', padx=5)
+        ctk.CTkLabel(frame_top, text="Cliente:").pack(side='left')
+        self.entry_cliente = ctk.CTkEntry(frame_top, width=300, placeholder_text="Nome do Cliente ou Empresa")
+        self.entry_cliente.pack(side='left', padx=10)
 
-        ttk.Label(frame_top, text="Custos Extras (R$):").pack(side='left', padx=10)
-        self.entry_extras = ttk.Entry(frame_top, width=15)
-        self.entry_extras.insert(0, "0")
+        ctk.CTkLabel(frame_top, text="Custos Extras (R$):").pack(side='left', padx=10)
+        self.entry_extras = ctk.CTkEntry(frame_top, width=150, placeholder_text="0.00")
         self.entry_extras.pack(side='left')
-        
-        # Área de Scroll para Checkboxes
-        lbl_escopo = ttk.Label(self.frame_orc, text="Selecione os Serviços do Escopo:", font=('Arial', 10, 'bold'))
-        lbl_escopo.pack(padx=20, pady=(10, 5), anchor='w')
-        
-        self.frame_tarefas_container = ttk.Frame(self.frame_orc)
-        self.frame_tarefas_container.pack(fill='both', expand=True, padx=20, pady=5)
-        
+
+        # Área de Scroll para Checkboxes (Modernizado)
+        ctk.CTkLabel(tab, text="Selecione os Serviços do Escopo:", font=('Segoe UI', 16, 'bold')).pack(padx=20, pady=(10, 5), anchor='w')
+
+        self.scrollable_frame = ctk.CTkScrollableFrame(tab, label_text="Lista de Serviços")
+        self.scrollable_frame.pack(fill='both', expand=True, padx=20, pady=5)
+
         # Botões de Ação
-        frame_btns = ttk.Frame(self.frame_orc)
-        frame_btns.pack(fill='x', padx=20, pady=10)
-        
-        ttk.Button(frame_btns, text="Recarregar Lista de Serviços", command=self.carregar_checkboxes_tarefas).pack(side='left')
-        ttk.Button(frame_btns, text="CALCULAR ORÇAMENTO", command=self.mostrar_previa).pack(side='right')
+        frame_btns = ctk.CTkFrame(tab, fg_color="transparent")
+        frame_btns.pack(fill='x', padx=20, pady=20)
+
+        ctk.CTkButton(frame_btns, text="🔄 Recarregar Lista", command=self.carregar_checkboxes_tarefas,
+                      fg_color="#34495E").pack(side='left')
+
+        ctk.CTkButton(frame_btns, text="💰 CALCULAR ORÇAMENTO", command=self.mostrar_previa,
+                      fg_color="#2CC985", text_color="white").pack(side='right')
 
         # Inicializa a lista
         self.check_vars = []
@@ -229,57 +297,49 @@ class App(tk.Tk):
 
     def carregar_checkboxes_tarefas(self):
         # Limpa área antiga
-        for widget in self.frame_tarefas_container.winfo_children():
+        for widget in self.scrollable_frame.winfo_children():
             widget.destroy()
-
-        # Canvas + Scrollbar setup
-        canvas = tk.Canvas(self.frame_tarefas_container)
-        scrollbar = ttk.Scrollbar(self.frame_tarefas_container, orient="vertical", command=canvas.yview)
-        self.scrollable_frame = ttk.Frame(canvas)
-
-        self.scrollable_frame.bind(
-            "<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
-        )
-        canvas.create_window((0, 0), window=self.scrollable_frame, anchor="nw")
-        canvas.configure(yscrollcommand=scrollbar.set)
-        
-        canvas.pack(side="left", fill="both", expand=True)
-        scrollbar.pack(side="right", fill="y")
 
         # Puxa do Banco de Dados
         servicos = self.db.get_servicos()
         self.check_vars = []
 
         for sid, nome, horas in servicos:
-            var = tk.BooleanVar(value=False) # Desmarcado por padrão para forçar escolha
-            # Texto do checkbox mostra o nome e as horas padrão
-            chk = ttk.Checkbutton(self.scrollable_frame, text=f"{nome} ({horas}h)", variable=var)
-            chk.pack(anchor='w', pady=2)
-            # Guardamos a referência: variavel, horas, nome
+            var = ctk.BooleanVar(value=False)
+            chk = ctk.CTkCheckBox(self.scrollable_frame, text=f"{nome} ({horas}h)", variable=var)
+            chk.pack(anchor='w', pady=5, padx=10)
             self.check_vars.append((var, horas, nome))
 
     # --- ABA 3: CATÁLOGO DE SERVIÇOS (NOVA) ---
     def create_tab_catalogo(self):
-        frame = ttk.Frame(self.notebook)
-        self.notebook.add(frame, text="Catálogo de Serviços")
+        tab = self.tabview.tab("Catálogo")
+
+        # Container principal
+        container = ctk.CTkFrame(tab, fg_color="transparent")
+        container.pack(fill="both", expand=True, padx=10, pady=10)
 
         # Lado Esquerdo: Formulário
-        frame_form = ttk.LabelFrame(frame, text="Adicionar Novo Serviço")
+        frame_form = ctk.CTkFrame(container)
         frame_form.pack(side='left', fill='y', padx=10, pady=10)
 
-        ttk.Label(frame_form, text="Nome da Tarefa:").pack(anchor='w', padx=5, pady=2)
-        self.entry_novo_servico = ttk.Entry(frame_form, width=30)
-        self.entry_novo_servico.pack(padx=5, pady=5)
+        ctk.CTkLabel(frame_form, text="Adicionar Novo Serviço", font=("Segoe UI", 16, "bold")).pack(pady=10)
 
-        ttk.Label(frame_form, text="Horas Padrão:").pack(anchor='w', padx=5, pady=2)
-        self.entry_novas_horas = ttk.Entry(frame_form, width=10)
-        self.entry_novas_horas.pack(padx=5, pady=5)
+        ctk.CTkLabel(frame_form, text="Nome da Tarefa:").pack(anchor='w', padx=10, pady=(10, 2))
+        self.entry_novo_servico = ctk.CTkEntry(frame_form, width=200, placeholder_text="Ex: Modelagem 3D")
+        self.entry_novo_servico.pack(padx=10, pady=5)
 
-        ttk.Button(frame_form, text="Adicionar ao Catálogo", command=self.adicionar_servico_db).pack(pady=10)
-        ttk.Button(frame_form, text="Excluir Selecionado", command=self.excluir_servico_db).pack(pady=20)
+        ctk.CTkLabel(frame_form, text="Horas Padrão:").pack(anchor='w', padx=10, pady=(10, 2))
+        self.entry_novas_horas = ctk.CTkEntry(frame_form, width=200, placeholder_text="Ex: 4.5")
+        self.entry_novas_horas.pack(padx=10, pady=5)
+
+        ctk.CTkButton(frame_form, text="➕ Adicionar ao Catálogo", command=self.adicionar_servico_db,
+                      fg_color="#2CC985").pack(pady=20, padx=10)
+
+        ctk.CTkButton(frame_form, text="🗑️ Excluir Selecionado", command=self.excluir_servico_db,
+                      fg_color="#C0392B").pack(pady=10, padx=10)
 
         # Lado Direito: Lista
-        frame_list = ttk.Frame(frame)
+        frame_list = ctk.CTkFrame(container, fg_color="transparent")
         frame_list.pack(side='right', fill='both', expand=True, padx=10, pady=10)
 
         colunas = ("id", "nome", "horas")
@@ -289,40 +349,45 @@ class App(tk.Tk):
         self.tree_cat.heading("horas", text="Horas Padrão")
         self.tree_cat.column("id", width=30)
         self.tree_cat.column("horas", width=80)
-        
+
         self.tree_cat.pack(fill='both', expand=True)
-        
+
         self.refresh_catalogo()
 
     # --- ABA 4: CONFIGURAÇÕES FINANCEIRAS ---
     def create_tab_config(self):
-        frame = ttk.Frame(self.notebook)
-        self.notebook.add(frame, text="Config. Financeira")
+        tab = self.tabview.tab("Config. Financeira")
+
+        # Center content
+        frame_center = ctk.CTkFrame(tab)
+        frame_center.pack(pady=40, padx=40)
+
+        ctk.CTkLabel(frame_center, text="Parâmetros Financeiros", font=("Segoe UI", 18, "bold")).grid(row=0, column=0, columnspan=2, pady=20)
 
         cfg = self.db.get_config()
-        
-        # Grid layout simples
-        ttk.Label(frame, text="Custos Fixos Mensais (R$):").grid(row=0, column=0, padx=10, pady=10)
-        self.entry_custo = ttk.Entry(frame)
+
+        ctk.CTkLabel(frame_center, text="Custos Fixos Mensais (R$):").grid(row=1, column=0, padx=20, pady=10, sticky="e")
+        self.entry_custo = ctk.CTkEntry(frame_center, width=150)
         self.entry_custo.insert(0, cfg[1])
-        self.entry_custo.grid(row=0, column=1)
+        self.entry_custo.grid(row=1, column=1, padx=20, pady=10, sticky="w")
 
-        ttk.Label(frame, text="Horas Produtivas/Mês:").grid(row=1, column=0, padx=10, pady=10)
-        self.entry_horas = ttk.Entry(frame)
+        ctk.CTkLabel(frame_center, text="Horas Produtivas/Mês:").grid(row=2, column=0, padx=20, pady=10, sticky="e")
+        self.entry_horas = ctk.CTkEntry(frame_center, width=150)
         self.entry_horas.insert(0, cfg[2])
-        self.entry_horas.grid(row=1, column=1)
+        self.entry_horas.grid(row=2, column=1, padx=20, pady=10, sticky="w")
 
-        ttk.Label(frame, text="Impostos (%):").grid(row=2, column=0, padx=10, pady=10)
-        self.entry_imposto = ttk.Entry(frame)
+        ctk.CTkLabel(frame_center, text="Impostos (%):").grid(row=3, column=0, padx=20, pady=10, sticky="e")
+        self.entry_imposto = ctk.CTkEntry(frame_center, width=150)
         self.entry_imposto.insert(0, cfg[3])
-        self.entry_imposto.grid(row=2, column=1)
+        self.entry_imposto.grid(row=3, column=1, padx=20, pady=10, sticky="w")
 
-        ttk.Label(frame, text="Margem de Lucro (%):").grid(row=3, column=0, padx=10, pady=10)
-        self.entry_lucro = ttk.Entry(frame)
+        ctk.CTkLabel(frame_center, text="Margem de Lucro (%):").grid(row=4, column=0, padx=20, pady=10, sticky="e")
+        self.entry_lucro = ctk.CTkEntry(frame_center, width=150)
         self.entry_lucro.insert(0, cfg[4])
-        self.entry_lucro.grid(row=3, column=1)
+        self.entry_lucro.grid(row=4, column=1, padx=20, pady=10, sticky="w")
 
-        ttk.Button(frame, text="Salvar Alterações", command=self.save_config).grid(row=4, column=0, columnspan=2, pady=20)
+        ctk.CTkButton(frame_center, text="💾 Salvar Alterações", command=self.save_config,
+                      fg_color="#2CC985").grid(row=5, column=0, columnspan=2, pady=30)
 
     # --- FUNÇÕES DE AÇÃO ---
 
@@ -384,34 +449,36 @@ class App(tk.Tk):
             if var.get():
                 horas_totais += horas
                 escopo_desc.append(f"{nome} ({horas}h)")
-        
+
         if horas_totais == 0:
             messagebox.showwarning("Atenção", "Selecione pelo menos uma tarefa.")
             return
 
         try:
             extras = float(self.entry_extras.get())
+            if self.entry_extras.get() == "": # Handle empty string
+                extras = 0
         except:
             extras = 0
 
         res = self.calc.calcular_orcamento(horas_totais, extras)
-        
+
         msg = f"""
         CLIENTE: {self.entry_cliente.get()}
         ----------------------------------
         Itens Selecionados: {len(escopo_desc)}
         Total de Horas: {horas_totais}h
-        
+
         CUSTOS:
         - Mão de obra: R$ {horas_totais * res['valor_hora']:.2f}
         - Extras: R$ {extras:.2f}
         - Impostos: R$ {res['impostos']:.2f}
-        
+
         LUCRO LÍQUIDO: R$ {res['lucro']:.2f}
         ----------------------------------
         PREÇO FINAL: R$ {res['preco_final']:.2f}
         """
-        
+
         if messagebox.askyesno("Orçamento Gerado", msg + "\n\nSalvar este projeto?"):
             self.salvar_projeto(res['preco_final'], extras)
 
@@ -424,18 +491,18 @@ class App(tk.Tk):
             INSERT INTO projetos (cliente, data_criacao, status, custo_extras, preco_final)
             VALUES (?, ?, ?, ?, ?)
         """, (cliente, datetime.now().strftime("%Y-%m-%d"), "Orçamento", extras, preco_final))
-        
+
         proj_id = self.db.cursor.lastrowid
-        
+
         for var, horas, nome in self.check_vars:
             if var.get():
-                self.db.cursor.execute("INSERT INTO tarefas_projeto (projeto_id, descricao, horas_estimadas) VALUES (?, ?, ?)", 
+                self.db.cursor.execute("INSERT INTO tarefas_projeto (projeto_id, descricao, horas_estimadas) VALUES (?, ?, ?)",
                                        (proj_id, nome, horas))
-        
+
         self.db.conn.commit()
         messagebox.showinfo("Sucesso", "Projeto Salvo!")
         self.refresh_projetos()
-        self.notebook.select(0) 
+        self.tabview.set("Meus Projetos")
 
 if __name__ == "__main__":
     app = App()
