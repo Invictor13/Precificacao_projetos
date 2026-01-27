@@ -1,8 +1,11 @@
 import sqlite3
 import tkinter as tk
-from tkinter import ttk, messagebox
+from tkinter import ttk, messagebox, filedialog
 from datetime import datetime
 import customtkinter as ctk
+from reportlab.pdfgen import canvas
+from reportlab.lib.pagesizes import A4
+from reportlab.lib import colors
 
 # --- CONFIGURAÇÃO INICIAL E BANCO DE DADOS ---
 
@@ -31,6 +34,15 @@ class Database:
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 nome TEXT,
                 horas_padrao REAL
+            )
+        """)
+
+        # Tabela de Custos Operacionais
+        self.cursor.execute("""
+            CREATE TABLE IF NOT EXISTS custos_operacionais (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                descricao TEXT,
+                valor REAL
             )
         """)
 
@@ -90,6 +102,22 @@ class Database:
             self.conn.commit()
             print("Catálogo de serviços inicial criado.")
 
+        # Seed Custos Operacionais
+        self.cursor.execute("SELECT count(*) FROM custos_operacionais")
+        if self.cursor.fetchone()[0] == 0:
+            custos_iniciais = [
+                ("Água", 35.0), ("Luz", 500.0), ("Telefone", 300.0), ("Internet", 50.0),
+                ("IPTU", 200.0), ("Condomínio", 100.0), ("Aluguel", 100.0), ("Faxina", 100.0),
+                ("Gás", 100.0), ("Alvará", 100.0), ("Material de limpeza", 100.0),
+                ("Papelaria/Escritório", 100.0), ("Software", 100.0), ("Pro labore", 3000.0),
+                ("Estagiário", 100.0), ("Associações", 100.0), ("Contabilidade", 100.0),
+                ("Marketing", 100.0), ("Conselho Profissional", 100.0), ("Cursos", 100.0),
+                ("Terceirizados", 10.0)
+            ]
+            self.cursor.executemany("INSERT INTO custos_operacionais (descricao, valor) VALUES (?, ?)", custos_iniciais)
+            self.conn.commit()
+            print("Custos operacionais iniciais criados.")
+
     # Métodos de Configuração
     def get_config(self):
         self.cursor.execute("SELECT * FROM configuracoes ORDER BY id DESC LIMIT 1")
@@ -115,6 +143,24 @@ class Database:
         self.cursor.execute("DELETE FROM catalogo_servicos WHERE id=?", (id_servico,))
         self.conn.commit()
 
+    # Métodos de Custos Operacionais
+    def get_custos_operacionais(self):
+        self.cursor.execute("SELECT id, descricao, valor FROM custos_operacionais ORDER BY descricao")
+        return self.cursor.fetchall()
+
+    def add_custo_operacional(self, descricao, valor):
+        self.cursor.execute("INSERT INTO custos_operacionais (descricao, valor) VALUES (?, ?)", (descricao, valor))
+        self.conn.commit()
+
+    def delete_custo_operacional(self, id_custo):
+        self.cursor.execute("DELETE FROM custos_operacionais WHERE id=?", (id_custo,))
+        self.conn.commit()
+
+    def get_total_custos_operacionais(self):
+        self.cursor.execute("SELECT SUM(valor) FROM custos_operacionais")
+        result = self.cursor.fetchone()[0]
+        return result if result else 0.0
+
     def get_dashboard_metrics(self):
         self.cursor.execute("SELECT COUNT(*), SUM(preco_final) FROM projetos")
         data = self.cursor.fetchone()
@@ -138,7 +184,7 @@ class CalculadoraPreco:
 
     def calcular_hora_tecnica(self):
         cfg = self.db.get_config()
-        custo_mensal = cfg[1]
+        custo_mensal = self.db.get_total_custos_operacionais()
         horas_mensais = cfg[2]
         return custo_mensal / horas_mensais if horas_mensais > 0 else 0
 
@@ -255,8 +301,18 @@ class App(ctk.CTk):
         self.tree_proj.column("id", width=50)
         self.tree_proj.pack(fill='both', expand=True, padx=10, pady=10)
 
-        ctk.CTkButton(frame, text="🔄 Atualizar Lista", command=self.refresh_projetos,
-                      fg_color="#34495E").pack(pady=10)
+        frame_btns = ctk.CTkFrame(frame, fg_color="transparent")
+        frame_btns.pack(pady=10)
+
+        ctk.CTkButton(frame_btns, text="🔄 Atualizar Lista", command=self.refresh_projetos,
+                      fg_color="#34495E").pack(side="left", padx=5)
+
+        ctk.CTkButton(frame_btns, text="✏️ Alterar Status", command=self.alterar_status,
+                      fg_color="#E67E22").pack(side="left", padx=5)
+
+        ctk.CTkButton(frame_btns, text="📄 Gerar Proposta PDF", command=self.gerar_pdf,
+                      fg_color="#C0392B").pack(side="left", padx=5)
+
         self.refresh_projetos()
 
     # --- ABA 2: NOVO ORÇAMENTO ---
@@ -358,45 +414,247 @@ class App(ctk.CTk):
     def create_tab_config(self):
         tab = self.tabview.tab("Config. Financeira")
 
-        # Center content
-        frame_center = ctk.CTkFrame(tab)
-        frame_center.pack(pady=40, padx=40)
+        # Two columns: Left (Costs), Right (Params)
+        tab.columnconfigure(0, weight=1)
+        tab.columnconfigure(1, weight=1)
+        tab.rowconfigure(0, weight=1)
 
-        ctk.CTkLabel(frame_center, text="Parâmetros Financeiros", font=("Segoe UI", 18, "bold")).grid(row=0, column=0, columnspan=2, pady=20)
+        # --- LEFT: Costs Table ---
+        frame_costs = ctk.CTkFrame(tab)
+        frame_costs.grid(row=0, column=0, sticky="nsew", padx=10, pady=10)
+
+        ctk.CTkLabel(frame_costs, text="Custos Operacionais", font=("Segoe UI", 16, "bold")).pack(pady=10)
+
+        # Table
+        cols = ("id", "desc", "val")
+        self.tree_custos = ttk.Treeview(frame_costs, columns=cols, show="headings", height=15)
+        self.tree_custos.heading("desc", text="Descrição")
+        self.tree_custos.heading("val", text="Valor (R$)")
+        self.tree_custos.column("id", width=0, stretch=False) # Hide ID
+        self.tree_custos.pack(fill="both", expand=True, padx=10, pady=5)
+
+        # Total Label
+        self.lbl_total_custos = ctk.CTkLabel(frame_costs, text="Total: R$ 0.00", font=("Segoe UI", 14, "bold"))
+        self.lbl_total_custos.pack(pady=5)
+
+        # Inputs
+        frame_input_costs = ctk.CTkFrame(frame_costs, fg_color="transparent")
+        frame_input_costs.pack(fill="x", padx=10, pady=10)
+
+        self.entry_desc_custo = ctk.CTkEntry(frame_input_costs, placeholder_text="Descrição")
+        self.entry_desc_custo.pack(side="left", fill="x", expand=True, padx=(0, 5))
+
+        self.entry_valor_custo = ctk.CTkEntry(frame_input_costs, width=100, placeholder_text="Valor")
+        self.entry_valor_custo.pack(side="left", padx=5)
+
+        ctk.CTkButton(frame_input_costs, text="+", width=40, command=self.add_custo_ui, fg_color="#2CC985").pack(side="left")
+        ctk.CTkButton(frame_input_costs, text="🗑️", width=40, fg_color="#C0392B", command=self.del_custo_ui).pack(side="left", padx=5)
+
+        self.refresh_custos_ui()
+
+        # --- RIGHT: Params ---
+        frame_params = ctk.CTkFrame(tab)
+        frame_params.grid(row=0, column=1, sticky="nsew", padx=10, pady=10)
+
+        ctk.CTkLabel(frame_params, text="Parâmetros Gerais", font=("Segoe UI", 16, "bold")).pack(pady=10)
 
         cfg = self.db.get_config()
 
-        ctk.CTkLabel(frame_center, text="Custos Fixos Mensais (R$):").grid(row=1, column=0, padx=20, pady=10, sticky="e")
-        self.entry_custo = ctk.CTkEntry(frame_center, width=150)
-        self.entry_custo.insert(0, cfg[1])
-        self.entry_custo.grid(row=1, column=1, padx=20, pady=10, sticky="w")
-
-        ctk.CTkLabel(frame_center, text="Horas Produtivas/Mês:").grid(row=2, column=0, padx=20, pady=10, sticky="e")
-        self.entry_horas = ctk.CTkEntry(frame_center, width=150)
+        ctk.CTkLabel(frame_params, text="Horas Produtivas/Mês:").pack(anchor="w", padx=20, pady=(10, 2))
+        self.entry_horas = ctk.CTkEntry(frame_params)
         self.entry_horas.insert(0, cfg[2])
-        self.entry_horas.grid(row=2, column=1, padx=20, pady=10, sticky="w")
+        self.entry_horas.pack(padx=20, fill="x")
 
-        ctk.CTkLabel(frame_center, text="Impostos (%):").grid(row=3, column=0, padx=20, pady=10, sticky="e")
-        self.entry_imposto = ctk.CTkEntry(frame_center, width=150)
+        ctk.CTkLabel(frame_params, text="Impostos (%):").pack(anchor="w", padx=20, pady=(10, 2))
+        self.entry_imposto = ctk.CTkEntry(frame_params)
         self.entry_imposto.insert(0, cfg[3])
-        self.entry_imposto.grid(row=3, column=1, padx=20, pady=10, sticky="w")
+        self.entry_imposto.pack(padx=20, fill="x")
 
-        ctk.CTkLabel(frame_center, text="Margem de Lucro (%):").grid(row=4, column=0, padx=20, pady=10, sticky="e")
-        self.entry_lucro = ctk.CTkEntry(frame_center, width=150)
+        ctk.CTkLabel(frame_params, text="Margem de Lucro (%):").pack(anchor="w", padx=20, pady=(10, 2))
+        self.entry_lucro = ctk.CTkEntry(frame_params)
         self.entry_lucro.insert(0, cfg[4])
-        self.entry_lucro.grid(row=4, column=1, padx=20, pady=10, sticky="w")
+        self.entry_lucro.pack(padx=20, fill="x")
 
-        ctk.CTkButton(frame_center, text="💾 Salvar Alterações", command=self.save_config,
-                      fg_color="#2CC985").grid(row=5, column=0, columnspan=2, pady=30)
+        ctk.CTkButton(frame_params, text="💾 Salvar Parâmetros", command=self.save_config, fg_color="#2CC985").pack(pady=30, padx=20, fill="x")
 
     # --- FUNÇÕES DE AÇÃO ---
+
+    def refresh_custos_ui(self):
+        for row in self.tree_custos.get_children():
+            self.tree_custos.delete(row)
+        custos = self.db.get_custos_operacionais()
+        total = 0
+        for c in custos:
+            self.tree_custos.insert("", "end", values=(c[0], c[1], f"R$ {c[2]:.2f}"))
+            total += c[2]
+        self.lbl_total_custos.configure(text=f"Total Calculado: R$ {total:.2f}")
+
+    def add_custo_ui(self):
+        desc = self.entry_desc_custo.get()
+        val = self.entry_valor_custo.get()
+        if desc and val:
+            try:
+                self.db.add_custo_operacional(desc, float(val))
+                self.refresh_custos_ui()
+                self.entry_desc_custo.delete(0, 'end')
+                self.entry_valor_custo.delete(0, 'end')
+            except ValueError:
+                messagebox.showerror("Erro", "Valor deve ser numérico.")
+        else:
+            messagebox.showwarning("Erro", "Preencha descrição e valor.")
+
+    def del_custo_ui(self):
+        selected = self.tree_custos.selection()
+        if selected:
+            item = self.tree_custos.item(selected[0])
+            if messagebox.askyesno("Confirmar", "Excluir custo selecionado?"):
+                self.db.delete_custo_operacional(item['values'][0])
+                self.refresh_custos_ui()
 
     def refresh_projetos(self):
         for row in self.tree_proj.get_children():
             self.tree_proj.delete(row)
+
+        # Tags de Cores para Status
+        self.tree_proj.tag_configure("Orçamento", foreground="#F39C12") # Laranja
+        self.tree_proj.tag_configure("Aprovado", foreground="#2ECC71") # Verde
+        self.tree_proj.tag_configure("Em Execução", foreground="#3498DB") # Azul
+        self.tree_proj.tag_configure("Concluído", foreground="#95A5A6") # Cinza
+
         self.db.cursor.execute("SELECT id, cliente, status, preco_final FROM projetos ORDER BY id DESC")
         for row in self.db.cursor.fetchall():
-            self.tree_proj.insert("", "end", values=(row[0], row[1], row[2], f"R$ {row[3]:.2f}"))
+            self.tree_proj.insert("", "end", values=(row[0], row[1], row[2], f"R$ {row[3]:.2f}"), tags=(row[2],))
+
+    def alterar_status(self):
+        selected = self.tree_proj.selection()
+        if not selected:
+            messagebox.showwarning("Atenção", "Selecione um projeto na lista.")
+            return
+
+        item = self.tree_proj.item(selected[0])
+        proj_id = item['values'][0]
+        current_status = item['values'][2]
+
+        # Janela Modal Simples
+        dialog = ctk.CTkToplevel(self)
+        dialog.title("Alterar Status")
+        dialog.geometry("300x150")
+        dialog.transient(self) # Mantém sobre a janela principal
+        dialog.grab_set()      # Bloqueia interação com a janela principal
+
+        ctk.CTkLabel(dialog, text="Selecione o Novo Status:", font=("Segoe UI", 14)).pack(pady=15)
+
+        status_options = ["Orçamento", "Aprovado", "Em Execução", "Concluído"]
+        combo = ctk.CTkComboBox(dialog, values=status_options)
+        combo.set(current_status)
+        combo.pack(pady=5)
+
+        def confirm():
+            new_status = combo.get()
+            self.db.cursor.execute("UPDATE projetos SET status=? WHERE id=?", (new_status, proj_id))
+            self.db.conn.commit()
+            self.refresh_projetos()
+            dialog.destroy()
+            messagebox.showinfo("Sucesso", "Status atualizado!")
+
+        ctk.CTkButton(dialog, text="Salvar", command=confirm, fg_color="#2CC985").pack(pady=15)
+
+    def gerar_pdf(self):
+        selected = self.tree_proj.selection()
+        if not selected:
+            messagebox.showwarning("Atenção", "Selecione um projeto.")
+            return
+
+        item = self.tree_proj.item(selected[0])
+        proj_id = item['values'][0]
+
+        # Fetch Data
+        self.db.cursor.execute("SELECT * FROM projetos WHERE id=?", (proj_id,))
+        proj = self.db.cursor.fetchone() # id, cliente, data, status, extras, preco
+
+        cliente = proj[1]
+        # data_criacao = proj[2] # Not used currently
+        extras = proj[4]
+        preco_final = proj[5]
+
+        self.db.cursor.execute("SELECT descricao, horas_estimadas FROM tarefas_projeto WHERE projeto_id=?", (proj_id,))
+        tarefas = self.db.cursor.fetchall()
+
+        # File Dialog
+        filename = filedialog.asksaveasfilename(defaultextension=".pdf", filetypes=[("PDF Files", "*.pdf")])
+        if not filename:
+            return
+
+        # PDF Generation
+        try:
+            c = canvas.Canvas(filename, pagesize=A4)
+            width, height = A4
+
+            # Header
+            c.setFont("Helvetica-Bold", 20)
+            c.drawString(50, height - 50, "Okami Project Manager")
+            c.setFont("Helvetica", 10)
+            c.drawString(50, height - 70, f"Data da Proposta: {datetime.now().strftime('%d/%m/%Y')}")
+
+            # Client
+            c.setFont("Helvetica-Bold", 12)
+            c.drawString(50, height - 110, f"Cliente: {cliente}")
+            c.drawString(50, height - 130, f"Projeto ID: #{proj_id}")
+
+            # Scope Table
+            y = height - 170
+            c.setFont("Helvetica-Bold", 14)
+            c.drawString(50, y, "Escopo do Projeto")
+            y -= 30
+
+            c.setFont("Helvetica-Bold", 10)
+            c.drawString(50, y, "Descrição da Tarefa")
+            c.drawString(400, y, "Horas Estimadas")
+            y -= 10
+            c.line(50, y, 500, y)
+            y -= 20
+
+            c.setFont("Helvetica", 10)
+            for desc, horas in tarefas:
+                c.drawString(50, y, desc)
+                c.drawString(400, y, f"{horas}h")
+                y -= 20
+                if y < 100: # New Page if low
+                    c.showPage()
+                    y = height - 50
+
+            # Financial Summary
+            y -= 30
+            c.line(50, y, 500, y)
+            y -= 30
+
+            c.setFont("Helvetica-Bold", 14)
+            c.drawString(50, y, "Resumo Financeiro")
+            y -= 30
+
+            c.setFont("Helvetica", 12)
+
+            # Calculate Service Total
+            total_servicos = preco_final - extras
+
+            c.drawString(50, y, f"Total dos Serviços:")
+            c.drawRightString(500, y, f"R$ {total_servicos:.2f}")
+            y -= 20
+
+            if extras > 0:
+                c.drawString(50, y, f"Custos Extras:")
+                c.drawRightString(500, y, f"R$ {extras:.2f}")
+                y -= 20
+
+            y -= 10
+            c.setFont("Helvetica-Bold", 14)
+            c.drawString(50, y, f"PREÇO TOTAL DO PROJETO:")
+            c.drawRightString(500, y, f"R$ {preco_final:.2f}")
+
+            c.save()
+            messagebox.showinfo("Sucesso", "PDF Gerado com sucesso!")
+        except Exception as e:
+            messagebox.showerror("Erro", f"Erro ao gerar PDF: {e}")
 
     def refresh_catalogo(self):
         for row in self.tree_cat.get_children():
@@ -432,7 +690,8 @@ class App(ctk.CTk):
 
     def save_config(self):
         try:
-            c = float(self.entry_custo.get())
+            # We calculate current total cost to save as snapshot/cache if needed by update_config
+            c = self.db.get_total_custos_operacionais()
             h = float(self.entry_horas.get())
             i = float(self.entry_imposto.get())
             l = float(self.entry_lucro.get())
