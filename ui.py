@@ -1,4 +1,3 @@
-import sqlite3
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
 from datetime import datetime
@@ -7,207 +6,8 @@ from reportlab.pdfgen import canvas
 from reportlab.lib.pagesizes import A4
 from reportlab.lib import colors
 
-# --- CONFIGURAÇÃO INICIAL E BANCO DE DADOS ---
-
-class Database:
-    def __init__(self, db_name="meus_projetos.db"):
-        self.conn = sqlite3.connect(db_name)
-        self.cursor = self.conn.cursor()
-        self.create_tables()
-        self.seed_data()
-
-    def create_tables(self):
-        # Tabela de Configurações Financeiras
-        self.cursor.execute("""
-            CREATE TABLE IF NOT EXISTS configuracoes (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                custo_mensal REAL,
-                horas_mensais REAL,
-                imposto_padrao REAL,
-                lucro_padrao REAL
-            )
-        """)
-
-        # Tabela de Catálogo de Serviços (NOVIDADE)
-        self.cursor.execute("""
-            CREATE TABLE IF NOT EXISTS catalogo_servicos (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                nome TEXT,
-                horas_padrao REAL
-            )
-        """)
-
-        # Tabela de Custos Operacionais
-        self.cursor.execute("""
-            CREATE TABLE IF NOT EXISTS custos_operacionais (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                descricao TEXT,
-                valor REAL
-            )
-        """)
-
-        # Tabela de Projetos
-        self.cursor.execute("""
-            CREATE TABLE IF NOT EXISTS projetos (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                cliente TEXT,
-                data_criacao TEXT,
-                status TEXT,
-                custo_extras REAL,
-                preco_final REAL
-            )
-        """)
-
-        # Tabela de Tarefas salvas em cada Projeto
-        self.cursor.execute("""
-            CREATE TABLE IF NOT EXISTS tarefas_projeto (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                projeto_id INTEGER,
-                descricao TEXT,
-                horas_estimadas REAL,
-                FOREIGN KEY(projeto_id) REFERENCES projetos(id)
-            )
-        """)
-        self.conn.commit()
-
-    def seed_data(self):
-        # Seed Configurações
-        self.cursor.execute("SELECT count(*) FROM configuracoes")
-        if self.cursor.fetchone()[0] == 0:
-            self.cursor.execute("""
-                INSERT INTO configuracoes (custo_mensal, horas_mensais, imposto_padrao, lucro_padrao)
-                VALUES (?, ?, ?, ?)
-            """, (5495.0, 180.0, 32.0, 30.0))
-            self.conn.commit()
-
-        # Seed Catálogo de Serviços (Se estiver vazio, preenche com o padrão do CSV)
-        self.cursor.execute("SELECT count(*) FROM catalogo_servicos")
-        if self.cursor.fetchone()[0] == 0:
-            tarefas_iniciais = [
-                ("Fechamento Orçamentário", 4),
-                ("Pesquisa de referencias", 4),
-                ("Pesquisa a campo", 10),
-                ("Pré-projeto", 1),
-                ("Projeto pré executivo", 1),
-                ("Reuniões (Pré-executivo)", 12),
-                ("Modelagem 3D", 1),
-                ("Projeto executivo", 1),
-                ("Reuniões (Executivo)", 5),
-                ("Correções 3D", 4),
-                ("Renderização", 7),
-                ("Detalhamentos finais", 2),
-                ("Entrega", 3)
-            ]
-            self.cursor.executemany("INSERT INTO catalogo_servicos (nome, horas_padrao) VALUES (?, ?)", tarefas_iniciais)
-            self.conn.commit()
-            print("Catálogo de serviços inicial criado.")
-
-        # Seed Custos Operacionais
-        self.cursor.execute("SELECT count(*) FROM custos_operacionais")
-        if self.cursor.fetchone()[0] == 0:
-            custos_iniciais = [
-                ("Água", 35.0), ("Luz", 500.0), ("Telefone", 300.0), ("Internet", 50.0),
-                ("IPTU", 200.0), ("Condomínio", 100.0), ("Aluguel", 100.0), ("Faxina", 100.0),
-                ("Gás", 100.0), ("Alvará", 100.0), ("Material de limpeza", 100.0),
-                ("Papelaria/Escritório", 100.0), ("Software", 100.0), ("Pro labore", 3000.0),
-                ("Estagiário", 100.0), ("Associações", 100.0), ("Contabilidade", 100.0),
-                ("Marketing", 100.0), ("Conselho Profissional", 100.0), ("Cursos", 100.0),
-                ("Terceirizados", 10.0)
-            ]
-            self.cursor.executemany("INSERT INTO custos_operacionais (descricao, valor) VALUES (?, ?)", custos_iniciais)
-            self.conn.commit()
-            print("Custos operacionais iniciais criados.")
-
-    # Métodos de Configuração
-    def get_config(self):
-        self.cursor.execute("SELECT * FROM configuracoes ORDER BY id DESC LIMIT 1")
-        return self.cursor.fetchone()
-
-    def update_config(self, custo, horas, imposto, lucro):
-        self.cursor.execute("""
-            UPDATE configuracoes SET custo_mensal=?, horas_mensais=?, imposto_padrao=?, lucro_padrao=?
-            WHERE id = (SELECT MAX(id) FROM configuracoes)
-        """, (custo, horas, imposto, lucro))
-        self.conn.commit()
-
-    # Métodos do Catálogo
-    def get_servicos(self):
-        self.cursor.execute("SELECT id, nome, horas_padrao FROM catalogo_servicos ORDER BY nome")
-        return self.cursor.fetchall()
-
-    def add_servico(self, nome, horas):
-        self.cursor.execute("INSERT INTO catalogo_servicos (nome, horas_padrao) VALUES (?, ?)", (nome, horas))
-        self.conn.commit()
-
-    def delete_servico(self, id_servico):
-        self.cursor.execute("DELETE FROM catalogo_servicos WHERE id=?", (id_servico,))
-        self.conn.commit()
-
-    # Métodos de Custos Operacionais
-    def get_custos_operacionais(self):
-        self.cursor.execute("SELECT id, descricao, valor FROM custos_operacionais ORDER BY descricao")
-        return self.cursor.fetchall()
-
-    def add_custo_operacional(self, descricao, valor):
-        self.cursor.execute("INSERT INTO custos_operacionais (descricao, valor) VALUES (?, ?)", (descricao, valor))
-        self.conn.commit()
-
-    def delete_custo_operacional(self, id_custo):
-        self.cursor.execute("DELETE FROM custos_operacionais WHERE id=?", (id_custo,))
-        self.conn.commit()
-
-    def get_total_custos_operacionais(self):
-        self.cursor.execute("SELECT SUM(valor) FROM custos_operacionais")
-        result = self.cursor.fetchone()[0]
-        return result if result else 0.0
-
-    def get_dashboard_metrics(self):
-        self.cursor.execute("SELECT COUNT(*), SUM(preco_final) FROM projetos")
-        data = self.cursor.fetchone()
-
-        total_projetos = data[0] if data[0] else 0
-        total_orcado = data[1] if data[1] else 0.0
-
-        ticket_medio = total_orcado / total_projetos if total_projetos > 0 else 0.0
-
-        return {
-            "total_projetos": total_projetos,
-            "total_orcado": total_orcado,
-            "ticket_medio": ticket_medio
-        }
-
-# --- LÓGICA DE NEGÓCIO ---
-
-class CalculadoraPreco:
-    def __init__(self, db):
-        self.db = db
-
-    def calcular_hora_tecnica(self):
-        cfg = self.db.get_config()
-        custo_mensal = self.db.get_total_custos_operacionais()
-        horas_mensais = cfg[2]
-        return custo_mensal / horas_mensais if horas_mensais > 0 else 0
-
-    def calcular_orcamento(self, horas_totais, custos_extras):
-        cfg = self.db.get_config()
-        imposto_pct = cfg[3] / 100
-        lucro_pct = cfg[4] / 100
-        valor_hora = self.calcular_hora_tecnica()
-
-        custo_producao = (horas_totais * valor_hora) + custos_extras
-        valor_impostos = custo_producao * imposto_pct
-        base_com_imposto = custo_producao + valor_impostos
-        preco_final = base_com_imposto * (1 + lucro_pct)
-
-        lucro_valor = preco_final - base_com_imposto
-
-        return {
-            "valor_hora": valor_hora,
-            "custo_producao": custo_producao,
-            "impostos": valor_impostos,
-            "lucro": lucro_valor,
-            "preco_final": preco_final
-        }
+from database import Database
+from logic import CalculadoraPreco
 
 # --- INTERFACE GRÁFICA (GUI) ---
 
@@ -219,6 +19,13 @@ class App(ctk.CTk):
         super().__init__()
         self.title("Okami Project Manager 2.0 - Local")
         self.geometry("1000x650")
+
+        # --- DEFINIÇÃO DE FONTES (DESIGN SYSTEM) ---
+        self.font_title = ctk.CTkFont(family="Segoe UI", size=20, weight="bold")
+        self.font_label = ctk.CTkFont(family="Segoe UI", size=14)
+        self.font_metric_value = ctk.CTkFont(family="Segoe UI", size=22, weight="bold")
+        self.font_default = ctk.CTkFont(family="Segoe UI", size=12)
+
         self.db = Database()
         self.calc = CalculadoraPreco(self.db)
 
@@ -265,7 +72,7 @@ class App(ctk.CTk):
         tab = self.tabview.tab("Home")
 
         # Título
-        ctk.CTkLabel(tab, text="Visão Geral do Negócio", font=("Segoe UI", 24, "bold")).pack(pady=20)
+        ctk.CTkLabel(tab, text="Visão Geral do Negócio", font=self.font_title).pack(pady=20)
 
         # Container de Métricas
         metrics_frame = ctk.CTkFrame(tab, fg_color="transparent")
@@ -284,8 +91,8 @@ class App(ctk.CTk):
         card.grid(row=0, column=col_idx, padx=10, pady=10, sticky="ew")
         parent.grid_columnconfigure(col_idx, weight=1)
 
-        ctk.CTkLabel(card, text=title, text_color="white", font=("Segoe UI", 14)).pack(pady=(15, 0))
-        ctk.CTkLabel(card, text=value, text_color="white", font=("Segoe UI", 22, "bold")).pack(pady=(5, 20))
+        ctk.CTkLabel(card, text=title, text_color="white", font=self.font_label).pack(pady=(15, 0))
+        ctk.CTkLabel(card, text=value, text_color="white", font=self.font_metric_value).pack(pady=(5, 20))
 
     # --- ABA 1: MEUS PROJETOS ---
     def create_tab_projetos(self):
@@ -304,14 +111,17 @@ class App(ctk.CTk):
         frame_btns = ctk.CTkFrame(frame, fg_color="transparent")
         frame_btns.pack(pady=10)
 
+        # Atualizar Lista -> Neutro
         ctk.CTkButton(frame_btns, text="🔄 Atualizar Lista", command=self.refresh_projetos,
-                      fg_color="#34495E").pack(side="left", padx=5)
+                      fg_color="#34495E", hover_color="#2C3E50").pack(side="left", padx=10)
 
+        # Alterar Status -> Neutro
         ctk.CTkButton(frame_btns, text="✏️ Alterar Status", command=self.alterar_status,
-                      fg_color="#E67E22").pack(side="left", padx=5)
+                      fg_color="#34495E", hover_color="#2C3E50").pack(side="left", padx=10)
 
+        # Gerar PDF -> Positivo
         ctk.CTkButton(frame_btns, text="📄 Gerar Proposta PDF", command=self.gerar_pdf,
-                      fg_color="#C0392B").pack(side="left", padx=5)
+                      fg_color="#2CC985", hover_color="#25A970").pack(side="left", padx=10)
 
         self.refresh_projetos()
 
@@ -323,29 +133,31 @@ class App(ctk.CTk):
         frame_top = ctk.CTkFrame(tab, fg_color="transparent")
         frame_top.pack(fill='x', padx=20, pady=10)
 
-        ctk.CTkLabel(frame_top, text="Cliente:").pack(side='left')
-        self.entry_cliente = ctk.CTkEntry(frame_top, width=300, placeholder_text="Nome do Cliente ou Empresa")
+        ctk.CTkLabel(frame_top, text="Cliente:", font=self.font_label).pack(side='left')
+        self.entry_cliente = ctk.CTkEntry(frame_top, width=300, height=35, placeholder_text="Nome do Cliente ou Empresa")
         self.entry_cliente.pack(side='left', padx=10)
 
-        ctk.CTkLabel(frame_top, text="Custos Extras (R$):").pack(side='left', padx=10)
-        self.entry_extras = ctk.CTkEntry(frame_top, width=150, placeholder_text="0.00")
+        ctk.CTkLabel(frame_top, text="Custos Extras (R$):", font=self.font_label).pack(side='left', padx=10)
+        self.entry_extras = ctk.CTkEntry(frame_top, width=150, height=35, placeholder_text="0.00")
         self.entry_extras.pack(side='left')
 
-        # Área de Scroll para Checkboxes (Modernizado)
-        ctk.CTkLabel(tab, text="Selecione os Serviços do Escopo:", font=('Segoe UI', 16, 'bold')).pack(padx=20, pady=(10, 5), anchor='w')
+        # Área de Scroll para Checkboxes
+        ctk.CTkLabel(tab, text="Selecione os Serviços do Escopo:", font=self.font_title).pack(padx=20, pady=(10, 5), anchor='w')
 
         self.scrollable_frame = ctk.CTkScrollableFrame(tab, label_text="Lista de Serviços")
-        self.scrollable_frame.pack(fill='both', expand=True, padx=20, pady=5)
+        self.scrollable_frame.pack(fill='both', expand=True, padx=20, pady=10)
 
         # Botões de Ação
         frame_btns = ctk.CTkFrame(tab, fg_color="transparent")
         frame_btns.pack(fill='x', padx=20, pady=20)
 
+        # Recarregar Lista -> Neutro
         ctk.CTkButton(frame_btns, text="🔄 Recarregar Lista", command=self.carregar_checkboxes_tarefas,
-                      fg_color="#34495E").pack(side='left')
+                      fg_color="#34495E", hover_color="#2C3E50").pack(side='left', padx=10)
 
+        # CALCULAR ORÇAMENTO -> Positivo
         ctk.CTkButton(frame_btns, text="💰 CALCULAR ORÇAMENTO", command=self.mostrar_previa,
-                      fg_color="#2CC985", text_color="white").pack(side='right')
+                      fg_color="#2CC985", hover_color="#25A970", text_color="white").pack(side='right', padx=10)
 
         # Inicializa a lista
         self.check_vars = []
@@ -362,7 +174,7 @@ class App(ctk.CTk):
 
         for sid, nome, horas in servicos:
             var = ctk.BooleanVar(value=False)
-            chk = ctk.CTkCheckBox(self.scrollable_frame, text=f"{nome} ({horas}h)", variable=var)
+            chk = ctk.CTkCheckBox(self.scrollable_frame, text=f"{nome} ({horas}h)", variable=var, font=self.font_label)
             chk.pack(anchor='w', pady=5, padx=10)
             self.check_vars.append((var, horas, nome))
 
@@ -378,21 +190,23 @@ class App(ctk.CTk):
         frame_form = ctk.CTkFrame(container)
         frame_form.pack(side='left', fill='y', padx=10, pady=10)
 
-        ctk.CTkLabel(frame_form, text="Adicionar Novo Serviço", font=("Segoe UI", 16, "bold")).pack(pady=10)
+        ctk.CTkLabel(frame_form, text="Adicionar Novo Serviço", font=self.font_title).pack(pady=10)
 
-        ctk.CTkLabel(frame_form, text="Nome da Tarefa:").pack(anchor='w', padx=10, pady=(10, 2))
-        self.entry_novo_servico = ctk.CTkEntry(frame_form, width=200, placeholder_text="Ex: Modelagem 3D")
+        ctk.CTkLabel(frame_form, text="Nome da Tarefa:", font=self.font_label).pack(anchor='w', padx=10, pady=(10, 2))
+        self.entry_novo_servico = ctk.CTkEntry(frame_form, width=200, height=35, placeholder_text="Ex: Modelagem 3D")
         self.entry_novo_servico.pack(padx=10, pady=5)
 
-        ctk.CTkLabel(frame_form, text="Horas Padrão:").pack(anchor='w', padx=10, pady=(10, 2))
-        self.entry_novas_horas = ctk.CTkEntry(frame_form, width=200, placeholder_text="Ex: 4.5")
+        ctk.CTkLabel(frame_form, text="Horas Padrão:", font=self.font_label).pack(anchor='w', padx=10, pady=(10, 2))
+        self.entry_novas_horas = ctk.CTkEntry(frame_form, width=200, height=35, placeholder_text="Ex: 4.5")
         self.entry_novas_horas.pack(padx=10, pady=5)
 
+        # Adicionar -> Positivo
         ctk.CTkButton(frame_form, text="➕ Adicionar ao Catálogo", command=self.adicionar_servico_db,
-                      fg_color="#2CC985").pack(pady=20, padx=10)
+                      fg_color="#2CC985", hover_color="#25A970").pack(pady=20, padx=10)
 
+        # Excluir -> Destrutivo
         ctk.CTkButton(frame_form, text="🗑️ Excluir Selecionado", command=self.excluir_servico_db,
-                      fg_color="#C0392B").pack(pady=10, padx=10)
+                      fg_color="#C0392B", hover_color="#E74C3C").pack(pady=10, padx=10)
 
         # Lado Direito: Lista
         frame_list = ctk.CTkFrame(container, fg_color="transparent")
@@ -423,7 +237,7 @@ class App(ctk.CTk):
         frame_costs = ctk.CTkFrame(tab)
         frame_costs.grid(row=0, column=0, sticky="nsew", padx=10, pady=10)
 
-        ctk.CTkLabel(frame_costs, text="Custos Operacionais", font=("Segoe UI", 16, "bold")).pack(pady=10)
+        ctk.CTkLabel(frame_costs, text="Custos Operacionais", font=self.font_title).pack(pady=10)
 
         # Table
         cols = ("id", "desc", "val")
@@ -434,21 +248,26 @@ class App(ctk.CTk):
         self.tree_custos.pack(fill="both", expand=True, padx=10, pady=5)
 
         # Total Label
-        self.lbl_total_custos = ctk.CTkLabel(frame_costs, text="Total: R$ 0.00", font=("Segoe UI", 14, "bold"))
+        self.lbl_total_custos = ctk.CTkLabel(frame_costs, text="Total: R$ 0.00", font=self.font_label)
         self.lbl_total_custos.pack(pady=5)
 
         # Inputs
         frame_input_costs = ctk.CTkFrame(frame_costs, fg_color="transparent")
         frame_input_costs.pack(fill="x", padx=10, pady=10)
 
-        self.entry_desc_custo = ctk.CTkEntry(frame_input_costs, placeholder_text="Descrição")
+        self.entry_desc_custo = ctk.CTkEntry(frame_input_costs, height=35, placeholder_text="Descrição")
         self.entry_desc_custo.pack(side="left", fill="x", expand=True, padx=(0, 5))
 
-        self.entry_valor_custo = ctk.CTkEntry(frame_input_costs, width=100, placeholder_text="Valor")
+        self.entry_valor_custo = ctk.CTkEntry(frame_input_costs, width=100, height=35, placeholder_text="0.00")
         self.entry_valor_custo.pack(side="left", padx=5)
 
-        ctk.CTkButton(frame_input_costs, text="+", width=40, command=self.add_custo_ui, fg_color="#2CC985").pack(side="left")
-        ctk.CTkButton(frame_input_costs, text="🗑️", width=40, fg_color="#C0392B", command=self.del_custo_ui).pack(side="left", padx=5)
+        # + -> Positivo
+        ctk.CTkButton(frame_input_costs, text="+", width=40, command=self.add_custo_ui,
+                      fg_color="#2CC985", hover_color="#25A970").pack(side="left")
+
+        # Trash -> Destrutivo
+        ctk.CTkButton(frame_input_costs, text="🗑️", width=40, command=self.del_custo_ui,
+                      fg_color="#C0392B", hover_color="#E74C3C").pack(side="left", padx=5)
 
         self.refresh_custos_ui()
 
@@ -456,26 +275,28 @@ class App(ctk.CTk):
         frame_params = ctk.CTkFrame(tab)
         frame_params.grid(row=0, column=1, sticky="nsew", padx=10, pady=10)
 
-        ctk.CTkLabel(frame_params, text="Parâmetros Gerais", font=("Segoe UI", 16, "bold")).pack(pady=10)
+        ctk.CTkLabel(frame_params, text="Parâmetros Gerais", font=self.font_title).pack(pady=10)
 
         cfg = self.db.get_config()
 
-        ctk.CTkLabel(frame_params, text="Horas Produtivas/Mês:").pack(anchor="w", padx=20, pady=(10, 2))
-        self.entry_horas = ctk.CTkEntry(frame_params)
+        ctk.CTkLabel(frame_params, text="Horas Produtivas/Mês:", font=self.font_label).pack(anchor="w", padx=20, pady=(10, 2))
+        self.entry_horas = ctk.CTkEntry(frame_params, height=35)
         self.entry_horas.insert(0, cfg[2])
         self.entry_horas.pack(padx=20, fill="x")
 
-        ctk.CTkLabel(frame_params, text="Impostos (%):").pack(anchor="w", padx=20, pady=(10, 2))
-        self.entry_imposto = ctk.CTkEntry(frame_params)
+        ctk.CTkLabel(frame_params, text="Impostos (%):", font=self.font_label).pack(anchor="w", padx=20, pady=(10, 2))
+        self.entry_imposto = ctk.CTkEntry(frame_params, height=35)
         self.entry_imposto.insert(0, cfg[3])
         self.entry_imposto.pack(padx=20, fill="x")
 
-        ctk.CTkLabel(frame_params, text="Margem de Lucro (%):").pack(anchor="w", padx=20, pady=(10, 2))
-        self.entry_lucro = ctk.CTkEntry(frame_params)
+        ctk.CTkLabel(frame_params, text="Margem de Lucro (%):", font=self.font_label).pack(anchor="w", padx=20, pady=(10, 2))
+        self.entry_lucro = ctk.CTkEntry(frame_params, height=35)
         self.entry_lucro.insert(0, cfg[4])
         self.entry_lucro.pack(padx=20, fill="x")
 
-        ctk.CTkButton(frame_params, text="💾 Salvar Parâmetros", command=self.save_config, fg_color="#2CC985").pack(pady=30, padx=20, fill="x")
+        # Salvar -> Positivo
+        ctk.CTkButton(frame_params, text="💾 Salvar Parâmetros", command=self.save_config,
+                      fg_color="#2CC985", hover_color="#25A970").pack(pady=30, padx=20, fill="x")
 
     # --- FUNÇÕES DE AÇÃO ---
 
@@ -542,7 +363,7 @@ class App(ctk.CTk):
         dialog.transient(self) # Mantém sobre a janela principal
         dialog.grab_set()      # Bloqueia interação com a janela principal
 
-        ctk.CTkLabel(dialog, text="Selecione o Novo Status:", font=("Segoe UI", 14)).pack(pady=15)
+        ctk.CTkLabel(dialog, text="Selecione o Novo Status:", font=self.font_label).pack(pady=15)
 
         status_options = ["Orçamento", "Aprovado", "Em Execução", "Concluído"]
         combo = ctk.CTkComboBox(dialog, values=status_options)
@@ -557,7 +378,9 @@ class App(ctk.CTk):
             dialog.destroy()
             messagebox.showinfo("Sucesso", "Status atualizado!")
 
-        ctk.CTkButton(dialog, text="Salvar", command=confirm, fg_color="#2CC985").pack(pady=15)
+        # Salvar -> Positivo
+        ctk.CTkButton(dialog, text="Salvar", command=confirm,
+                      fg_color="#2CC985", hover_color="#25A970").pack(pady=15)
 
     def gerar_pdf(self):
         selected = self.tree_proj.selection()
@@ -762,7 +585,3 @@ class App(ctk.CTk):
         messagebox.showinfo("Sucesso", "Projeto Salvo!")
         self.refresh_projetos()
         self.tabview.set("Meus Projetos")
-
-if __name__ == "__main__":
-    app = App()
-    app.mainloop()
