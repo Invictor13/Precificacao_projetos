@@ -25,13 +25,24 @@ ctk.set_default_color_theme("blue")
 class App(ctk.CTk):
     def __init__(self):
         super().__init__()
-        self.title("Okami Project Manager 2.0 - Local")
-        self.geometry("1000x650")
+        self.title("Protótipo de Gestão de Projetos - Por Victor")
+        self.geometry("1100x700")
+
+        # --- DESIGN SYSTEM (CORES) ---
+        self.col_bg = "#0f172a"       # Dark Blue/Black
+        self.col_card = "#1e293b"     # Lighter Dark
+        self.col_accent = "#8b5cf6"   # Neon Purple
+        self.col_success = "#10b981"  # Cyber Green
+        self.col_text = "#f1f5f9"     # White-ish
+        self.col_text_muted = "#94a3b8" # Gray
+
+        self.configure(fg_color=self.col_bg)
 
         # --- DEFINIÇÃO DE FONTES (DESIGN SYSTEM) ---
-        self.font_title = ctk.CTkFont(family="Segoe UI", size=20, weight="bold")
+        self.font_title = ctk.CTkFont(family="Segoe UI", size=24, weight="bold")
+        self.font_subtitle = ctk.CTkFont(family="Segoe UI", size=18, weight="bold")
         self.font_label = ctk.CTkFont(family="Segoe UI", size=14)
-        self.font_metric_value = ctk.CTkFont(family="Segoe UI", size=22, weight="bold")
+        self.font_metric_value = ctk.CTkFont(family="Segoe UI", size=28, weight="bold")
         self.font_default = ctk.CTkFont(family="Segoe UI", size=12)
 
         self.db = Database()
@@ -45,25 +56,32 @@ class App(ctk.CTk):
 
         # Estilo do Corpo da Tabela
         style.configure("Treeview",
-                        background="#2b2b2b",
-                        foreground="white",
-                        rowheight=30,
-                        fieldbackground="#2b2b2b",
-                        borderwidth=0)
-        style.map('Treeview', background=[('selected', '#1f6aa5')])
+                        background=self.col_card,
+                        foreground=self.col_text,
+                        rowheight=45,
+                        fieldbackground=self.col_card,
+                        borderwidth=0,
+                        font=self.font_label)
+        style.map('Treeview', background=[('selected', self.col_accent)], foreground=[('selected', 'white')])
 
         # Estilo do Cabeçalho
         style.configure("Treeview.Heading",
-                        background="#1f2630",
-                        foreground="white",
+                        background=self.col_bg,
+                        foreground=self.col_text,
                         relief="flat",
-                        font=('Segoe UI', 10, 'bold'))
+                        font=('Segoe UI', 12, 'bold'))
         style.map("Treeview.Heading",
-                    background=[('active', '#10141a')])
+                    background=[('active', self.col_card)])
 
         # Container Principal (Tabview)
-        self.tabview = ctk.CTkTabview(self)
-        self.tabview.pack(fill="both", expand=True, padx=10, pady=10)
+        # Customizing Tabview to fit the dark theme better if possible,
+        # but mostly relying on the content frames to carry the design.
+        self.tabview = ctk.CTkTabview(self, fg_color=self.col_bg,
+                                      segmented_button_fg_color=self.col_card,
+                                      segmented_button_selected_color=self.col_accent,
+                                      segmented_button_selected_hover_color=self.col_accent,
+                                      segmented_button_unselected_hover_color=self.col_card)
+        self.tabview.pack(fill="both", expand=True, padx=20, pady=20)
 
         self.tabview.add("Home")
         self.tabview.add("Meus Projetos")
@@ -81,32 +99,36 @@ class App(ctk.CTk):
     def create_tab_home(self):
         self.tab_home = self.tabview.tab("Home")
 
-        # Header: Greeting & Filter
-        self.frame_header = ctk.CTkFrame(self.tab_home, fg_color="transparent")
-        self.frame_header.pack(fill="x", padx=20, pady=10)
+        # Header: Greeting & Filter (Banner Style)
+        self.frame_header = ctk.CTkFrame(self.tab_home, fg_color=self.col_card, corner_radius=10)
+        self.frame_header.pack(fill="x", padx=20, pady=15)
 
         self.lbl_greeting = ctk.CTkLabel(self.frame_header, text="", font=self.font_title)
-        self.lbl_greeting.pack(side="left")
+        self.lbl_greeting.pack(side="left", padx=20, pady=15)
 
         self.combo_filter = ctk.CTkComboBox(self.frame_header,
                                             values=["Todos", "Este Mês", "Este Ano"],
                                             command=self.update_dashboard,
-                                            width=150)
+                                            width=150,
+                                            fg_color=self.col_bg,
+                                            button_color=self.col_accent,
+                                            button_hover_color=self.col_accent,
+                                            border_color=self.col_card)
         self.combo_filter.set("Todos")
-        self.combo_filter.pack(side="right")
+        self.combo_filter.pack(side="right", padx=20)
 
         # Container de Métricas
         self.metrics_frame = ctk.CTkFrame(self.tab_home, fg_color="transparent")
-        self.metrics_frame.pack(fill="x", padx=20, pady=5)
+        self.metrics_frame.pack(fill="x", padx=10, pady=5)
 
         # Container de Meta
         self.frame_meta = ctk.CTkFrame(self.tab_home, fg_color="transparent")
-        self.frame_meta.pack(fill="x", padx=30, pady=5)
+        self.frame_meta.pack(fill="x", padx=30, pady=10)
 
-        self.lbl_meta_title = ctk.CTkLabel(self.frame_meta, text="Meta Mensal", font=self.font_label)
+        self.lbl_meta_title = ctk.CTkLabel(self.frame_meta, text="Meta Mensal", font=self.font_label, text_color=self.col_text_muted)
         self.lbl_meta_title.pack(anchor="w")
 
-        self.progress_meta = ctk.CTkProgressBar(self.frame_meta)
+        self.progress_meta = ctk.CTkProgressBar(self.frame_meta, progress_color=self.col_success, fg_color=self.col_card)
         self.progress_meta.pack(fill="x", pady=5)
         self.progress_meta.set(0)
 
@@ -148,22 +170,11 @@ class App(ctk.CTk):
         for widget in self.metrics_frame.winfo_children():
             widget.destroy()
 
-        self.create_metric_card(self.metrics_frame, "Total Orçado", f"R$ {metrics['total_orcado']:.2f}", "#1F6AA5", 0)
-        self.create_metric_card(self.metrics_frame, "Projetos na Base", f"{metrics['total_projetos']}", "#2CC985", 1)
-        self.create_metric_card(self.metrics_frame, "Ticket Médio", f"R$ {metrics['ticket_medio']:.2f}", "#E67E22", 2)
+        self.create_metric_card(self.metrics_frame, "Total Orçado", f"R$ {metrics['total_orcado']:.2f}", self.col_accent, 0, icon="💰")
+        self.create_metric_card(self.metrics_frame, "Projetos na Base", f"{metrics['total_projetos']}", self.col_success, 1, icon="📂")
+        self.create_metric_card(self.metrics_frame, "Ticket Médio", f"R$ {metrics['ticket_medio']:.2f}", "#F59E0B", 2, icon="📈")
 
         # 4. Update Meta Progress
-        # Meta only makes sense if filtering by Month, or maybe it's always Monthly Meta?
-        # User requested: "showing how much left to reach month's goal".
-        # Usually compared against current month's revenue.
-        # If filter is "Todos" or "Este Ano", comparing to Monthly Meta might be confusing, but I'll stick to
-        # "Total displayed vs Meta" or "Current Month vs Meta".
-        # Let's assume the progress bar ALWAYS shows THIS MONTH'S progress regardless of filter,
-        # OR shows progress of the filtered period against that period's meta (which is hard to calculate).
-        # Decision: The progress bar is for "Meta Mensal". So we should fetch THIS MONTH's data specifically for it,
-        # OR if the user selected "Este Mês", we use that.
-        # Let's fetch "This Month" data specifically for the meta bar to be always relevant.
-
         metrics_month = self.db.get_dashboard_metrics(filtro_mes=now.strftime("%m"), filtro_ano=now.strftime("%Y"))
         val_month = metrics_month['total_orcado']
 
@@ -184,37 +195,54 @@ class App(ctk.CTk):
             labels = [x[0] for x in status_data]
             sizes = [x[1] for x in status_data]
             colors_map = {
-                "Orçamento": "#F39C12",
-                "Aprovado": "#2ECC71",
-                "Em Execução": "#3498DB",
-                "Concluído": "#95A5A6"
+                "Orçamento": "#F59E0B",
+                "Aprovado": self.col_success,
+                "Em Execução": "#3B82F6",
+                "Concluído": "#64748B"
             }
-            colors_list = [colors_map.get(l, "#BDC3C7") for l in labels]
+            colors_list = [colors_map.get(l, "#94A3B8") for l in labels]
 
             fig, ax = plt.subplots(figsize=(6, 4), dpi=100)
-            fig.patch.set_facecolor('#2b2b2b') # Background color matching theme (roughly)
-            ax.set_facecolor('#2b2b2b')
+            fig.patch.set_facecolor(self.col_card)
+            ax.set_facecolor(self.col_card)
 
             wedges, texts, autotexts = ax.pie(sizes, labels=labels, autopct='%1.1f%%',
                                               startangle=90, colors=colors_list,
-                                              textprops=dict(color="white"))
+                                              textprops=dict(color=self.col_text))
 
-            ax.axis('equal')  # Equal aspect ratio ensures that pie is drawn as a circle.
-            ax.set_title(f"Status dos Projetos ({filtro})", color="white", fontsize=12)
+            # Make text/autotext visible on dark
+            plt.setp(texts, color=self.col_text)
+            plt.setp(autotexts, color="white", weight="bold")
+
+            ax.axis('equal')
+            ax.set_title(f"Status dos Projetos ({filtro})", color=self.col_text, fontsize=12, weight="bold")
 
             canvas = FigureCanvasTkAgg(fig, master=self.frame_charts)
             canvas.draw()
             canvas.get_tk_widget().pack(fill="both", expand=True)
         else:
-            ctk.CTkLabel(self.frame_charts, text="Sem dados para exibir gráfico", font=self.font_label).pack(pady=20)
+            ctk.CTkLabel(self.frame_charts, text="Sem dados para exibir gráfico", font=self.font_label, text_color=self.col_text_muted).pack(pady=20)
 
-    def create_metric_card(self, parent, title, value, color, col_idx):
-        card = ctk.CTkFrame(parent, fg_color=color, corner_radius=15)
+    def create_metric_card(self, parent, title, value, color, col_idx, icon="📊"):
+        # Main Card Frame
+        card = ctk.CTkFrame(parent, fg_color=self.col_card, corner_radius=15)
         card.grid(row=0, column=col_idx, padx=10, pady=10, sticky="ew")
         parent.grid_columnconfigure(col_idx, weight=1)
 
-        ctk.CTkLabel(card, text=title, text_color="white", font=self.font_label).pack(pady=(15, 0))
-        ctk.CTkLabel(card, text=value, text_color="white", font=self.font_metric_value).pack(pady=(5, 20))
+        # Colored Strip (Left)
+        strip = ctk.CTkFrame(card, fg_color=color, width=5, corner_radius=5)
+        strip.pack(side="left", fill="y", padx=(0, 10))
+
+        # Content Frame
+        content = ctk.CTkFrame(card, fg_color="transparent")
+        content.pack(side="left", fill="both", expand=True, padx=5, pady=5)
+
+        ctk.CTkLabel(content, text=title, text_color=self.col_text_muted, font=self.font_label).pack(anchor="w", pady=(10, 0))
+        ctk.CTkLabel(content, text=value, text_color="white", font=self.font_metric_value).pack(anchor="w", pady=(5, 15))
+
+        # Icon (Right/Background) - Simulated Watermark
+        lbl_icon = ctk.CTkLabel(card, text=icon, font=ctk.CTkFont(size=40), text_color="#334155")
+        lbl_icon.place(relx=1.0, rely=0.5, anchor="e", x=-15)
 
     # --- ABA 1: MEUS PROJETOS ---
     def create_tab_projetos(self):
@@ -222,9 +250,10 @@ class App(ctk.CTk):
 
         # Search Bar
         frame_search = ctk.CTkFrame(frame, fg_color="transparent")
-        frame_search.pack(fill="x", padx=10, pady=5)
+        frame_search.pack(fill="x", padx=10, pady=(10, 5))
 
-        self.entry_search = ctk.CTkEntry(frame_search, placeholder_text="🔍 Pesquisar Cliente...")
+        self.entry_search = ctk.CTkEntry(frame_search, placeholder_text="🔍 Pesquisar Cliente...",
+                                         height=40, border_width=0, fg_color=self.col_card)
         self.entry_search.pack(fill="x")
         self.entry_search.bind("<KeyRelease>", lambda e: self.refresh_projetos(self.entry_search.get()))
 
@@ -256,11 +285,11 @@ class App(ctk.CTk):
         # Row 1 Buttons
         # Atualizar
         ctk.CTkButton(frame_btns, text="🔄", width=40, command=lambda: self.refresh_projetos(),
-                      fg_color="#34495E").grid(row=0, column=0, padx=5)
+                      fg_color=self.col_card, hover_color=self.col_bg).grid(row=0, column=0, padx=5)
 
         # Editar
         ctk.CTkButton(frame_btns, text="✏️ Editar", command=self.editar_projeto,
-                      fg_color="#2980B9", hover_color="#3498DB").grid(row=0, column=1, padx=5)
+                      fg_color=self.col_accent, hover_color="#7c3aed").grid(row=0, column=1, padx=5)
 
         # Duplicar
         ctk.CTkButton(frame_btns, text="🐑 Duplicar", command=self.duplicar_projeto,
@@ -272,11 +301,11 @@ class App(ctk.CTk):
 
         # PDF
         ctk.CTkButton(frame_btns, text="📄 PDF", command=self.gerar_pdf,
-                      fg_color="#2CC985", hover_color="#27AE60").grid(row=0, column=4, padx=5)
+                      fg_color=self.col_success, hover_color="#059669").grid(row=0, column=4, padx=5)
 
         # Excluir
         ctk.CTkButton(frame_btns, text="🗑️", width=40, command=self.excluir_projeto,
-                      fg_color="#C0392B", hover_color="#E74C3C").grid(row=0, column=5, padx=5)
+                      fg_color="#EF4444", hover_color="#DC2626").grid(row=0, column=5, padx=5)
 
         self.refresh_projetos()
 
@@ -305,8 +334,8 @@ class App(ctk.CTk):
         self.frame_orc_form = ctk.CTkFrame(tab, fg_color="transparent")
         self.frame_orc_form.grid(row=0, column=0, sticky="nsew", padx=10, pady=10)
 
-        # Right: Preview
-        self.frame_orc_preview = ctk.CTkFrame(tab, fg_color="#1F2630", corner_radius=15)
+        # Right: Preview (Sidebar style)
+        self.frame_orc_preview = ctk.CTkFrame(tab, fg_color=self.col_card, corner_radius=15, border_width=1, border_color="#334155")
         self.frame_orc_preview.grid(row=0, column=1, sticky="nsew", padx=10, pady=10)
 
         # --- FORM BUILD ---
@@ -315,17 +344,19 @@ class App(ctk.CTk):
         f_client.pack(fill="x", pady=5)
 
         ctk.CTkLabel(f_client, text="Cliente:", font=self.font_label).pack(anchor="w")
-        self.entry_cliente = ctk.CTkEntry(f_client, height=35, placeholder_text="Nome do Cliente")
+        self.entry_cliente = ctk.CTkEntry(f_client, height=40, placeholder_text="Nome do Cliente",
+                                          fg_color=self.col_card, border_width=0)
         self.entry_cliente.pack(fill="x", pady=(2, 10))
         self.entry_cliente.bind("<KeyRelease>", self.update_live_preview) # Live Update
 
         ctk.CTkLabel(f_client, text="Previsão de Entrega:", font=self.font_label).pack(anchor="w")
         try:
-            self.entry_data = DateEntry(f_client, width=12, background='darkblue',
-                                        foreground='white', borderwidth=2)
+            self.entry_data = DateEntry(f_client, width=12, background=self.col_accent,
+                                        foreground='white', borderwidth=0, headersbackground=self.col_card,
+                                        normalbackground=self.col_card, normalforeground='white')
         except:
              # Fallback if tkcalendar fails or locale issue
-             self.entry_data = ctk.CTkEntry(f_client, placeholder_text="dd/mm/aaaa")
+             self.entry_data = ctk.CTkEntry(f_client, placeholder_text="dd/mm/aaaa", height=40, fg_color=self.col_card, border_width=0)
 
         self.entry_data.pack(anchor="w", pady=(2, 10))
         # Bind for DateEntry
@@ -338,7 +369,8 @@ class App(ctk.CTk):
         f_costs.pack(fill="x", pady=5)
 
         ctk.CTkLabel(f_costs, text="Custos Extras (R$):", font=self.font_label).pack(anchor="w")
-        self.entry_extras = ctk.CTkEntry(f_costs, height=35, placeholder_text="0.00")
+        self.entry_extras = ctk.CTkEntry(f_costs, height=40, placeholder_text="0.00",
+                                         fg_color=self.col_card, border_width=0)
         self.entry_extras.pack(fill="x", pady=(2, 10))
         self.entry_extras.bind("<KeyRelease>", self.update_live_preview)
 
@@ -346,35 +378,37 @@ class App(ctk.CTk):
         header_frame = ctk.CTkFrame(self.frame_orc_form, fg_color="transparent")
         header_frame.pack(fill="x", pady=(10, 5))
         ctk.CTkLabel(header_frame, text="Escopo do Projeto:", font=self.font_title).pack(side="left")
-        ctk.CTkButton(header_frame, text="🔄", width=30, command=self.carregar_checkboxes_tarefas, fg_color="#34495E").pack(side="right")
+        ctk.CTkButton(header_frame, text="🔄", width=30, command=self.carregar_checkboxes_tarefas,
+                      fg_color=self.col_card, hover_color=self.col_bg).pack(side="right")
 
-        self.scrollable_frame = ctk.CTkScrollableFrame(self.frame_orc_form, label_text="Selecione os Serviços")
+        self.scrollable_frame = ctk.CTkScrollableFrame(self.frame_orc_form, label_text="Selecione os Serviços",
+                                                       fg_color=self.col_card, label_fg_color=self.col_bg)
         self.scrollable_frame.pack(fill="both", expand=True, pady=5)
 
         # --- PREVIEW BUILD ---
         ctk.CTkLabel(self.frame_orc_preview, text="Resumo do Orçamento", font=self.font_title, text_color="white").pack(pady=20)
 
-        self.lbl_prev_horas = ctk.CTkLabel(self.frame_orc_preview, text="Horas: 0h", font=self.font_label, text_color="#BDC3C7")
+        self.lbl_prev_horas = ctk.CTkLabel(self.frame_orc_preview, text="Horas: 0h", font=self.font_label, text_color=self.col_text_muted)
         self.lbl_prev_horas.pack(pady=5)
 
-        self.lbl_prev_custo = ctk.CTkLabel(self.frame_orc_preview, text="Custo Prod: R$ 0.00", font=self.font_label, text_color="#BDC3C7")
+        self.lbl_prev_custo = ctk.CTkLabel(self.frame_orc_preview, text="Custo Prod: R$ 0.00", font=self.font_label, text_color=self.col_text_muted)
         self.lbl_prev_custo.pack(pady=5)
 
-        self.lbl_prev_lucro = ctk.CTkLabel(self.frame_orc_preview, text="Lucro Líq: R$ 0.00", font=self.font_label, text_color="#BDC3C7")
+        self.lbl_prev_lucro = ctk.CTkLabel(self.frame_orc_preview, text="Lucro Líq: R$ 0.00", font=self.font_label, text_color=self.col_text_muted)
         self.lbl_prev_lucro.pack(pady=5)
 
-        ctk.CTkFrame(self.frame_orc_preview, height=2, fg_color="gray").pack(fill="x", padx=20, pady=10) # Divider
+        ctk.CTkFrame(self.frame_orc_preview, height=2, fg_color="#334155").pack(fill="x", padx=20, pady=10) # Divider
 
-        self.lbl_prev_total = ctk.CTkLabel(self.frame_orc_preview, text="R$ 0.00", font=ctk.CTkFont(size=30, weight="bold"), text_color="#2CC985")
+        self.lbl_prev_total = ctk.CTkLabel(self.frame_orc_preview, text="R$ 0.00", font=ctk.CTkFont(size=36, weight="bold"), text_color=self.col_success)
         self.lbl_prev_total.pack(pady=10)
 
         # Save Button
         ctk.CTkButton(self.frame_orc_preview, text="💾 Salvar/Gerar Projeto", command=self.finalizar_orcamento,
-                      fg_color="#2CC985", hover_color="#25A970", height=40).pack(side="bottom", padx=20, pady=20, fill="x")
+                      fg_color=self.col_success, hover_color="#059669", height=50, font=ctk.CTkFont(weight="bold")).pack(side="bottom", padx=20, pady=20, fill="x")
 
         # Cancel/Clear Button
         ctk.CTkButton(self.frame_orc_preview, text="❌ Limpar / Cancelar", command=self.cancelar_edicao,
-                      fg_color="#C0392B", hover_color="#E74C3C").pack(side="bottom", padx=20, pady=(0, 5), fill="x")
+                      fg_color="#EF4444", hover_color="#DC2626").pack(side="bottom", padx=20, pady=(0, 5), fill="x")
 
         # Load Data
         self.check_vars = []
@@ -420,38 +454,41 @@ class App(ctk.CTk):
         container.pack(fill="both", expand=True, padx=10, pady=10)
 
         # Lado Esquerdo: Formulário
-        frame_form = ctk.CTkFrame(container)
+        frame_form = ctk.CTkFrame(container, fg_color=self.col_card)
         frame_form.pack(side='left', fill='y', padx=10, pady=10)
 
         ctk.CTkLabel(frame_form, text="Adicionar Serviço", font=self.font_title).pack(pady=10)
 
         ctk.CTkLabel(frame_form, text="Nome da Tarefa:", font=self.font_label).pack(anchor='w', padx=10, pady=(5, 2))
-        self.entry_novo_servico = ctk.CTkEntry(frame_form, width=200, height=35, placeholder_text="Ex: Modelagem 3D")
+        self.entry_novo_servico = ctk.CTkEntry(frame_form, width=200, height=40, placeholder_text="Ex: Modelagem 3D",
+                                               fg_color=self.col_bg, border_width=0)
         self.entry_novo_servico.pack(padx=10, pady=5)
 
         ctk.CTkLabel(frame_form, text="Categoria:", font=self.font_label).pack(anchor='w', padx=10, pady=(5, 2))
-        self.combo_nova_cat = ctk.CTkComboBox(frame_form, values=["Pré-Projeto", "Execução", "Pós-Produção", "Geral"])
+        self.combo_nova_cat = ctk.CTkComboBox(frame_form, values=["Pré-Projeto", "Execução", "Pós-Produção", "Geral"],
+                                              fg_color=self.col_bg, button_color=self.col_accent)
         self.combo_nova_cat.pack(padx=10, pady=5)
 
         ctk.CTkLabel(frame_form, text="Horas Padrão:", font=self.font_label).pack(anchor='w', padx=10, pady=(5, 2))
-        self.entry_novas_horas = ctk.CTkEntry(frame_form, width=200, height=35, placeholder_text="Ex: 4.5")
+        self.entry_novas_horas = ctk.CTkEntry(frame_form, width=200, height=40, placeholder_text="Ex: 4.5",
+                                              fg_color=self.col_bg, border_width=0)
         self.entry_novas_horas.pack(padx=10, pady=5)
 
         # Adicionar -> Positivo
         ctk.CTkButton(frame_form, text="➕ Adicionar", command=self.adicionar_servico_db,
-                      fg_color="#2CC985", hover_color="#25A970").pack(pady=15, padx=10, fill="x")
+                      fg_color=self.col_success, hover_color="#059669").pack(pady=15, padx=10, fill="x")
 
         ctk.CTkLabel(frame_form, text="Ferramentas CSV", font=self.font_title).pack(pady=(20, 10))
 
         ctk.CTkButton(frame_form, text="📂 Importar CSV", command=self.importar_csv,
-                      fg_color="#34495E", hover_color="#2C3E50").pack(pady=5, padx=10, fill="x")
+                      fg_color=self.col_bg, hover_color="#334155").pack(pady=5, padx=10, fill="x")
 
         ctk.CTkButton(frame_form, text="💾 Exportar CSV", command=self.exportar_csv,
-                      fg_color="#34495E", hover_color="#2C3E50").pack(pady=5, padx=10, fill="x")
+                      fg_color=self.col_bg, hover_color="#334155").pack(pady=5, padx=10, fill="x")
 
         # Excluir -> Destrutivo
         ctk.CTkButton(frame_form, text="🗑️ Excluir Selecionado", command=self.excluir_servico_db,
-                      fg_color="#C0392B", hover_color="#E74C3C").pack(side="bottom", pady=20, padx=10, fill="x")
+                      fg_color="#EF4444", hover_color="#DC2626").pack(side="bottom", pady=20, padx=10, fill="x")
 
         # Lado Direito: Lista
         frame_list = ctk.CTkFrame(container, fg_color="transparent")
@@ -459,7 +496,8 @@ class App(ctk.CTk):
 
         # Filter
         self.combo_cat_filter = ctk.CTkComboBox(frame_list, values=["Todas", "Pré-Projeto", "Execução", "Pós-Produção", "Geral"],
-                                                command=lambda x: self.refresh_catalogo())
+                                                command=lambda x: self.refresh_catalogo(),
+                                                fg_color=self.col_card, button_color=self.col_accent)
         self.combo_cat_filter.set("Todas")
         self.combo_cat_filter.pack(anchor="ne", pady=5)
 
@@ -506,17 +544,19 @@ class App(ctk.CTk):
         frame_input_costs = ctk.CTkFrame(frame_costs, fg_color="transparent")
         frame_input_costs.pack(fill="x", padx=10, pady=10)
 
-        self.entry_desc_custo = ctk.CTkEntry(frame_input_costs, height=35, placeholder_text="Descrição")
+        self.entry_desc_custo = ctk.CTkEntry(frame_input_costs, height=40, placeholder_text="Descrição",
+                                             fg_color=self.col_card, border_width=0)
         self.entry_desc_custo.pack(side="left", fill="x", expand=True, padx=(0, 5))
 
-        self.entry_valor_custo = ctk.CTkEntry(frame_input_costs, width=100, height=35, placeholder_text="0.00")
+        self.entry_valor_custo = ctk.CTkEntry(frame_input_costs, width=100, height=40, placeholder_text="0.00",
+                                              fg_color=self.col_card, border_width=0)
         self.entry_valor_custo.pack(side="left", padx=5)
 
         ctk.CTkButton(frame_input_costs, text="+", width=40, command=self.add_custo_ui,
-                      fg_color="#2CC985", hover_color="#25A970").pack(side="left")
+                      fg_color=self.col_success, hover_color="#059669").pack(side="left")
 
         ctk.CTkButton(frame_input_costs, text="🗑️", width=40, command=self.del_custo_ui,
-                      fg_color="#C0392B", hover_color="#E74C3C").pack(side="left", padx=5)
+                      fg_color="#EF4444", hover_color="#DC2626").pack(side="left", padx=5)
 
         self.refresh_custos_ui()
 
@@ -531,58 +571,70 @@ class App(ctk.CTk):
 
         # Usuario
         ctk.CTkLabel(frame_params, text="Nome de Usuário:", font=self.font_label).pack(anchor="w", padx=20)
-        self.entry_usuario = ctk.CTkEntry(frame_params, height=35)
+        self.entry_usuario = ctk.CTkEntry(frame_params, height=35, fg_color=self.col_card, border_width=0)
         self.entry_usuario.insert(0, cfg[6] if len(cfg)>6 else "Usuário")
         self.entry_usuario.pack(padx=20, fill="x", pady=(0,10))
 
         # Horas
         ctk.CTkLabel(frame_params, text="Horas Produtivas/Mês:", font=self.font_label).pack(anchor="w", padx=20)
-        self.entry_horas = ctk.CTkEntry(frame_params, height=35)
+        self.entry_horas = ctk.CTkEntry(frame_params, height=35, fg_color=self.col_card, border_width=0)
         self.entry_horas.insert(0, cfg[2])
         self.entry_horas.pack(padx=20, fill="x", pady=(0,10))
 
         # Meta
         ctk.CTkLabel(frame_params, text="Meta de Faturamento Mensal (R$):", font=self.font_label).pack(anchor="w", padx=20)
-        self.entry_meta = ctk.CTkEntry(frame_params, height=35)
+        self.entry_meta = ctk.CTkEntry(frame_params, height=35, fg_color=self.col_card, border_width=0)
         self.entry_meta.insert(0, cfg[5] if len(cfg)>5 else 10000.0)
         self.entry_meta.pack(padx=20, fill="x", pady=(0,10))
 
         # Tax Profile
         ctk.CTkLabel(frame_params, text="Perfil Tributário:", font=self.font_label).pack(anchor="w", padx=20)
         self.combo_tax = ctk.CTkComboBox(frame_params, values=["Personalizado", "MEI (0%)", "Simples (6%)", "Lucro Presumido (16.33%)"],
-                                         command=self.update_tax_profile)
+                                         command=self.update_tax_profile, fg_color=self.col_card, button_color=self.col_accent)
         self.combo_tax.pack(padx=20, fill="x", pady=(0,10))
         self.combo_tax.set("Personalizado")
 
         # Sliders
         # Impostos
         ctk.CTkLabel(frame_params, text="Impostos (%):", font=self.font_label).pack(anchor="w", padx=20)
-        self.slider_imposto = ctk.CTkSlider(frame_params, from_=0, to=40, command=self.update_slider_labels)
+
+        frame_imp = ctk.CTkFrame(frame_params, fg_color="transparent")
+        frame_imp.pack(fill="x", padx=20, pady=(0, 10))
+
+        self.slider_imposto = ctk.CTkSlider(frame_imp, from_=0, to=40, command=self.update_slider_labels,
+                                            button_color=self.col_accent, progress_color=self.col_accent)
         self.slider_imposto.set(cfg[3])
-        self.slider_imposto.pack(padx=20, fill="x")
-        self.lbl_imposto_val = ctk.CTkLabel(frame_params, text=f"{cfg[3]}%")
-        self.lbl_imposto_val.pack(padx=20, anchor="e")
+        self.slider_imposto.pack(side="left", fill="x", expand=True)
+
+        self.lbl_imposto_val = ctk.CTkLabel(frame_imp, text=f"{cfg[3]}%", width=50, font=ctk.CTkFont(weight="bold"))
+        self.lbl_imposto_val.pack(side="right", padx=(10,0))
 
         # Lucro
         ctk.CTkLabel(frame_params, text="Margem de Lucro (%):", font=self.font_label).pack(anchor="w", padx=20)
-        self.slider_lucro = ctk.CTkSlider(frame_params, from_=0, to=100, command=self.update_slider_labels)
+
+        frame_lucro = ctk.CTkFrame(frame_params, fg_color="transparent")
+        frame_lucro.pack(fill="x", padx=20, pady=(0, 10))
+
+        self.slider_lucro = ctk.CTkSlider(frame_lucro, from_=0, to=100, command=self.update_slider_labels,
+                                          button_color=self.col_accent, progress_color=self.col_accent)
         self.slider_lucro.set(cfg[4])
-        self.slider_lucro.pack(padx=20, fill="x")
-        self.lbl_lucro_val = ctk.CTkLabel(frame_params, text=f"{cfg[4]}%")
-        self.lbl_lucro_val.pack(padx=20, anchor="e")
+        self.slider_lucro.pack(side="left", fill="x", expand=True)
+
+        self.lbl_lucro_val = ctk.CTkLabel(frame_lucro, text=f"{cfg[4]}%", width=50, font=ctk.CTkFont(weight="bold"))
+        self.lbl_lucro_val.pack(side="right", padx=(10,0))
 
         # Salvar -> Positivo
         ctk.CTkButton(frame_params, text="💾 Salvar Configurações", command=self.save_config,
-                      fg_color="#2CC985", hover_color="#25A970").pack(pady=20, padx=20, fill="x")
+                      fg_color=self.col_success, hover_color="#059669").pack(pady=20, padx=20, fill="x")
 
         # Backup/Restore
         frame_bkp = ctk.CTkFrame(frame_params, fg_color="transparent")
         frame_bkp.pack(fill="x", padx=20, pady=10)
 
         ctk.CTkButton(frame_bkp, text="☁️ Backup", command=self.backup_db, width=100,
-                      fg_color="#34495E").pack(side="left", padx=5, expand=True)
+                      fg_color=self.col_card, hover_color=self.col_bg).pack(side="left", padx=5, expand=True)
         ctk.CTkButton(frame_bkp, text="🔄 Restore", command=self.restore_db, width=100,
-                      fg_color="#C0392B").pack(side="right", padx=5, expand=True)
+                      fg_color="#EF4444", hover_color="#DC2626").pack(side="right", padx=5, expand=True)
 
     def update_slider_labels(self, _=None):
         self.lbl_imposto_val.configure(text=f"{int(self.slider_imposto.get())}%")
