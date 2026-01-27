@@ -2,3 +2,5 @@ customtkinter
 packaging
 pillow
 reportlab
+matplotlib
+tkcalendar
