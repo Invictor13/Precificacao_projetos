@@ -5,6 +5,7 @@ class Database:
         self.conn = sqlite3.connect(db_name)
         self.cursor = self.conn.cursor()
         self.create_tables()
+        self.check_and_migrate()
         self.seed_data()
 
     def create_tables(self):
@@ -15,16 +16,19 @@ class Database:
                 custo_mensal REAL,
                 horas_mensais REAL,
                 imposto_padrao REAL,
-                lucro_padrao REAL
+                lucro_padrao REAL,
+                meta_mensal REAL DEFAULT 10000.0,
+                nome_usuario TEXT DEFAULT 'Visitante'
             )
         """)
 
-        # Tabela de Catálogo de Serviços (NOVIDADE)
+        # Tabela de Catálogo de Serviços
         self.cursor.execute("""
             CREATE TABLE IF NOT EXISTS catalogo_servicos (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 nome TEXT,
-                horas_padrao REAL
+                horas_padrao REAL,
+                categoria TEXT DEFAULT 'Geral'
             )
         """)
 
@@ -43,6 +47,7 @@ class Database:
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 cliente TEXT,
                 data_criacao TEXT,
+                data_entrega TEXT,
                 status TEXT,
                 custo_extras REAL,
                 preco_final REAL
@@ -61,35 +66,73 @@ class Database:
         """)
         self.conn.commit()
 
+    def check_and_migrate(self):
+        # Verifica colunas em 'catalogo_servicos'
+        self.cursor.execute("PRAGMA table_info(catalogo_servicos)")
+        cols = [info[1] for info in self.cursor.fetchall()]
+        if "categoria" not in cols:
+            print("Migrando DB: Adicionando coluna 'categoria' em catalogo_servicos...")
+            self.cursor.execute("ALTER TABLE catalogo_servicos ADD COLUMN categoria TEXT DEFAULT 'Geral'")
+
+            # Atualiza categorias padrão para dados existentes (tentativa heurística)
+            mapping = {
+                "Pré-Projeto": ["Fechamento", "Pesquisa", "Pré-projeto", "Reuniões (Pré"],
+                "Execução": ["Projeto", "Modelagem", "Reuniões (Exe", "Correções"],
+                "Pós-Produção": ["Render", "Detalhamento", "Entrega"]
+            }
+            for cat, keywords in mapping.items():
+                for kw in keywords:
+                    self.cursor.execute(f"UPDATE catalogo_servicos SET categoria = ? WHERE nome LIKE ?", (cat, f"%{kw}%"))
+            self.conn.commit()
+
+        # Verifica colunas em 'configuracoes'
+        self.cursor.execute("PRAGMA table_info(configuracoes)")
+        cols = [info[1] for info in self.cursor.fetchall()]
+        if "meta_mensal" not in cols:
+            print("Migrando DB: Adicionando coluna 'meta_mensal' em configuracoes...")
+            self.cursor.execute("ALTER TABLE configuracoes ADD COLUMN meta_mensal REAL DEFAULT 10000.0")
+        if "nome_usuario" not in cols:
+            print("Migrando DB: Adicionando coluna 'nome_usuario' em configuracoes...")
+            self.cursor.execute("ALTER TABLE configuracoes ADD COLUMN nome_usuario TEXT DEFAULT 'Visitante'")
+
+        # Verifica colunas em 'projetos'
+        self.cursor.execute("PRAGMA table_info(projetos)")
+        cols = [info[1] for info in self.cursor.fetchall()]
+        if "data_entrega" not in cols:
+            print("Migrando DB: Adicionando coluna 'data_entrega' em projetos...")
+            self.cursor.execute("ALTER TABLE projetos ADD COLUMN data_entrega TEXT")
+
+        self.conn.commit()
+
     def seed_data(self):
         # Seed Configurações
         self.cursor.execute("SELECT count(*) FROM configuracoes")
         if self.cursor.fetchone()[0] == 0:
             self.cursor.execute("""
-                INSERT INTO configuracoes (custo_mensal, horas_mensais, imposto_padrao, lucro_padrao)
-                VALUES (?, ?, ?, ?)
-            """, (5495.0, 180.0, 32.0, 30.0))
+                INSERT INTO configuracoes (custo_mensal, horas_mensais, imposto_padrao, lucro_padrao, meta_mensal, nome_usuario)
+                VALUES (?, ?, ?, ?, ?, ?)
+            """, (5495.0, 180.0, 32.0, 30.0, 15000.0, "Okami"))
             self.conn.commit()
 
-        # Seed Catálogo de Serviços (Se estiver vazio, preenche com o padrão do CSV)
+        # Seed Catálogo de Serviços
         self.cursor.execute("SELECT count(*) FROM catalogo_servicos")
         if self.cursor.fetchone()[0] == 0:
             tarefas_iniciais = [
-                ("Fechamento Orçamentário", 4),
-                ("Pesquisa de referencias", 4),
-                ("Pesquisa a campo", 10),
-                ("Pré-projeto", 1),
-                ("Projeto pré executivo", 1),
-                ("Reuniões (Pré-executivo)", 12),
-                ("Modelagem 3D", 1),
-                ("Projeto executivo", 1),
-                ("Reuniões (Executivo)", 5),
-                ("Correções 3D", 4),
-                ("Renderização", 7),
-                ("Detalhamentos finais", 2),
-                ("Entrega", 3)
+                ("Fechamento Orçamentário", 4, "Pré-Projeto"),
+                ("Pesquisa de referencias", 4, "Pré-Projeto"),
+                ("Pesquisa a campo", 10, "Pré-Projeto"),
+                ("Pré-projeto", 1, "Pré-Projeto"),
+                ("Projeto pré executivo", 1, "Execução"),
+                ("Reuniões (Pré-executivo)", 12, "Pré-Projeto"),
+                ("Modelagem 3D", 1, "Execução"),
+                ("Projeto executivo", 1, "Execução"),
+                ("Reuniões (Executivo)", 5, "Execução"),
+                ("Correções 3D", 4, "Execução"),
+                ("Renderização", 7, "Pós-Produção"),
+                ("Detalhamentos finais", 2, "Pós-Produção"),
+                ("Entrega", 3, "Pós-Produção")
             ]
-            self.cursor.executemany("INSERT INTO catalogo_servicos (nome, horas_padrao) VALUES (?, ?)", tarefas_iniciais)
+            self.cursor.executemany("INSERT INTO catalogo_servicos (nome, horas_padrao, categoria) VALUES (?, ?, ?)", tarefas_iniciais)
             self.conn.commit()
             print("Catálogo de serviços inicial criado.")
 
@@ -114,20 +157,31 @@ class Database:
         self.cursor.execute("SELECT * FROM configuracoes ORDER BY id DESC LIMIT 1")
         return self.cursor.fetchone()
 
-    def update_config(self, custo, horas, imposto, lucro):
-        self.cursor.execute("""
-            UPDATE configuracoes SET custo_mensal=?, horas_mensais=?, imposto_padrao=?, lucro_padrao=?
-            WHERE id = (SELECT MAX(id) FROM configuracoes)
-        """, (custo, horas, imposto, lucro))
+    def update_config(self, custo, horas, imposto, lucro, meta, nome):
+        # Verifica se já existe config
+        if self.get_config():
+            self.cursor.execute("""
+                UPDATE configuracoes SET custo_mensal=?, horas_mensais=?, imposto_padrao=?, lucro_padrao=?, meta_mensal=?, nome_usuario=?
+                WHERE id = (SELECT MAX(id) FROM configuracoes)
+            """, (custo, horas, imposto, lucro, meta, nome))
+        else:
+             self.cursor.execute("""
+                INSERT INTO configuracoes (custo_mensal, horas_mensais, imposto_padrao, lucro_padrao, meta_mensal, nome_usuario)
+                VALUES (?, ?, ?, ?, ?, ?)
+            """, (custo, horas, imposto, lucro, meta, nome))
         self.conn.commit()
 
     # Métodos do Catálogo
     def get_servicos(self):
-        self.cursor.execute("SELECT id, nome, horas_padrao FROM catalogo_servicos ORDER BY nome")
+        self.cursor.execute("SELECT id, nome, horas_padrao, categoria FROM catalogo_servicos ORDER BY categoria, nome")
         return self.cursor.fetchall()
 
-    def add_servico(self, nome, horas):
-        self.cursor.execute("INSERT INTO catalogo_servicos (nome, horas_padrao) VALUES (?, ?)", (nome, horas))
+    def get_categorias(self):
+        self.cursor.execute("SELECT DISTINCT categoria FROM catalogo_servicos ORDER BY categoria")
+        return [row[0] for row in self.cursor.fetchall()]
+
+    def add_servico(self, nome, horas, categoria="Geral"):
+        self.cursor.execute("INSERT INTO catalogo_servicos (nome, horas_padrao, categoria) VALUES (?, ?, ?)", (nome, horas, categoria))
         self.conn.commit()
 
     def delete_servico(self, id_servico):
@@ -152,8 +206,24 @@ class Database:
         result = self.cursor.fetchone()[0]
         return result if result else 0.0
 
-    def get_dashboard_metrics(self):
-        self.cursor.execute("SELECT COUNT(*), SUM(preco_final) FROM projetos")
+    def get_dashboard_metrics(self, filtro_mes=None, filtro_ano=None):
+        query = "SELECT COUNT(*), SUM(preco_final) FROM projetos"
+        params = []
+
+        where_clauses = []
+        if filtro_mes and filtro_mes != "Todos":
+             # Assuming data_criacao is YYYY-MM-DD
+             where_clauses.append("strftime('%m', data_criacao) = ?")
+             params.append(filtro_mes)
+
+        if filtro_ano and filtro_ano != "Todos":
+             where_clauses.append("strftime('%Y', data_criacao) = ?")
+             params.append(filtro_ano)
+
+        if where_clauses:
+            query += " WHERE " + " AND ".join(where_clauses)
+
+        self.cursor.execute(query, params)
         data = self.cursor.fetchone()
 
         total_projetos = data[0] if data[0] else 0
@@ -161,8 +231,18 @@ class Database:
 
         ticket_medio = total_orcado / total_projetos if total_projetos > 0 else 0.0
 
+        # Get Status Distribution for Pie Chart
+        query_status = "SELECT status, COUNT(*) FROM projetos"
+        if where_clauses:
+            query_status += " WHERE " + " AND ".join(where_clauses)
+        query_status += " GROUP BY status"
+
+        self.cursor.execute(query_status, params)
+        status_dist = self.cursor.fetchall()
+
         return {
             "total_projetos": total_projetos,
             "total_orcado": total_orcado,
-            "ticket_medio": ticket_medio
+            "ticket_medio": ticket_medio,
+            "status_dist": status_dist
         }
