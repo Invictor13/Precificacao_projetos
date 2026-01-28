@@ -626,6 +626,10 @@ class App(ctk.CTk):
     def create_tab_catalogo(self):
         tab = self.tabview.tab("Catálogo")
 
+        # Top Section: Most Profitable Card
+        frame_top = ctk.CTkFrame(tab, fg_color="transparent")
+        frame_top.pack(fill="x", padx=10, pady=5)
+
         # Container principal
         container = ctk.CTkFrame(tab, fg_color="transparent")
         container.pack(fill="both", expand=True, padx=10, pady=10)
@@ -651,6 +655,12 @@ class App(ctk.CTk):
                                               fg_color=self.col_bg, border_width=0)
         self.entry_novas_horas.pack(padx=10, pady=5)
 
+        ctk.CTkLabel(frame_form, text="Tags:", font=self.font_label).pack(anchor='w', padx=10, pady=(5, 2))
+        self.combo_tags = ctk.CTkComboBox(frame_form, values=["Interno", "Terceirizável", "Presencial", "Remoto"],
+                                          fg_color=self.col_bg, button_color=self.col_accent)
+        self.combo_tags.set("")
+        self.combo_tags.pack(padx=10, pady=5)
+
         # Adicionar -> Positivo
         ctk.CTkButton(frame_form, text="➕ Adicionar", command=self.adicionar_servico_db,
                       fg_color=self.col_success, hover_color="#059669").pack(pady=15, padx=10, fill="x")
@@ -663,6 +673,10 @@ class App(ctk.CTk):
         ctk.CTkButton(frame_form, text="💾 Exportar CSV", command=self.exportar_csv,
                       fg_color=self.col_bg, hover_color="#334155").pack(pady=5, padx=10, fill="x")
 
+        # Reajuste Global
+        ctk.CTkButton(frame_form, text="🌍 Reajuste (+10%)", command=self.reajuste_global_modal,
+                      fg_color="#F59E0B", hover_color="#D97706").pack(pady=5, padx=10, fill="x")
+
         # Excluir -> Destrutivo
         ctk.CTkButton(frame_form, text="🗑️ Excluir Selecionado", command=self.excluir_servico_db,
                       fg_color="#EF4444", hover_color="#DC2626").pack(side="bottom", pady=20, padx=10, fill="x")
@@ -671,27 +685,87 @@ class App(ctk.CTk):
         frame_list = ctk.CTkFrame(container, fg_color="transparent")
         frame_list.pack(side='right', fill='both', expand=True, padx=10, pady=10)
 
+        # Header Right
+        header_right = ctk.CTkFrame(frame_list, fg_color="transparent")
+        header_right.pack(fill="x", pady=(0, 10))
+
+        # Search
+        self.entry_cat_search = ctk.CTkEntry(header_right, placeholder_text="🔍 Buscar serviço...", width=200, fg_color=self.col_card, border_width=0)
+        self.entry_cat_search.pack(side="left", padx=(0, 10))
+        self.entry_cat_search.bind("<KeyRelease>", lambda e: self.refresh_catalogo())
+
         # Filter
-        self.combo_cat_filter = ctk.CTkComboBox(frame_list, values=["Todas", "Pré-Projeto", "Execução", "Pós-Produção", "Geral"],
+        self.combo_cat_filter = ctk.CTkComboBox(header_right, values=["Todas", "Pré-Projeto", "Execução", "Pós-Produção", "Geral"],
                                                 command=lambda x: self.refresh_catalogo(),
                                                 fg_color=self.col_card, button_color=self.col_accent)
         self.combo_cat_filter.set("Todas")
-        self.combo_cat_filter.pack(anchor="ne", pady=5)
+        self.combo_cat_filter.pack(side="left", padx=10)
 
-        colunas = ("id", "nome", "horas", "categoria")
+        # Clone Button
+        ctk.CTkButton(header_right, text="🐑 Clonar", width=80, command=self.clonar_servico,
+                      fg_color=self.col_card, hover_color=self.col_bg).pack(side="right")
+
+        colunas = ("id", "nome", "horas", "categoria", "tags", "uso")
         self.tree_cat = ttk.Treeview(frame_list, columns=colunas, show='headings')
         self.tree_cat.heading("id", text="ID")
         self.tree_cat.heading("nome", text="Serviço")
         self.tree_cat.heading("horas", text="Horas")
         self.tree_cat.heading("categoria", text="Categoria")
+        self.tree_cat.heading("tags", text="Tags")
+        self.tree_cat.heading("uso", text="Uso")
 
         self.tree_cat.column("id", width=30)
         self.tree_cat.column("horas", width=60)
-        self.tree_cat.column("categoria", width=100)
+        self.tree_cat.column("categoria", width=120)
+        self.tree_cat.column("tags", width=100)
+        self.tree_cat.column("uso", width=50)
 
         self.tree_cat.pack(fill='both', expand=True)
         self.tree_cat.bind("<Double-1>", self.editar_servico_modal)
 
+        # Most Profitable Card
+        self.lbl_profitable = ctk.CTkLabel(frame_top, text="", font=self.font_label, text_color=self.col_success)
+        self.lbl_profitable.pack(anchor="w")
+
+        self.refresh_catalogo()
+
+    def reajuste_global_modal(self):
+        win = ctk.CTkToplevel(self)
+        win.title("Reajuste Global")
+        win.geometry("300x200")
+
+        ctk.CTkLabel(win, text="Reajustar todas as horas em %:", font=self.font_label).pack(pady=20)
+        e_pct = ctk.CTkEntry(win, placeholder_text="10 ou -5")
+        e_pct.pack(pady=10)
+
+        def confirm():
+            try:
+                val = float(e_pct.get())
+                if messagebox.askyesno("Confirmar", f"Isso alterará TODAS as horas em {val}%. Continuar?"):
+                    self.db.adjust_catalog_hours(val)
+                    self.refresh_catalogo()
+                    win.destroy()
+                    messagebox.showinfo("Sucesso", "Horas reajustadas!")
+            except ValueError:
+                messagebox.showerror("Erro", "Valor inválido.")
+
+        ctk.CTkButton(win, text="Aplicar", command=confirm, fg_color="#F59E0B").pack(pady=10)
+
+    def clonar_servico(self):
+        selected = self.tree_cat.selection()
+        if not selected: return
+        item = self.tree_cat.item(selected[0])
+        # values: id, nome, horas, categoria, tags, uso
+        vals = item['values']
+
+        # Copia com nome modificado
+        novo_nome = vals[1] + " (Cópia)"
+        # Note: treeview values are strings, need to parse if needed, but DB handles types mostly.
+        # But 'vals' might not have all columns if indices shifted.
+        # Let's assume order matches columns definition.
+        # id=0, nome=1, horas=2, cat=3, tags=4, uso=5
+
+        self.db.add_servico(novo_nome, float(vals[2]), vals[3], vals[4])
         self.refresh_catalogo()
 
     # --- ABA 4: CONFIGURAÇÕES FINANCEIRAS ---
@@ -702,14 +776,20 @@ class App(ctk.CTk):
         tab.columnconfigure(1, weight=1)
         tab.rowconfigure(0, weight=1)
 
-        # --- LEFT: Costs Table ---
-        frame_costs = ctk.CTkFrame(tab)
-        frame_costs.grid(row=0, column=0, sticky="nsew", padx=10, pady=10)
+        # --- LEFT: Costs Table & Chart ---
+        frame_left = ctk.CTkFrame(tab, fg_color="transparent")
+        frame_left.grid(row=0, column=0, sticky="nsew", padx=10, pady=10)
+        frame_left.rowconfigure(0, weight=1) # Table
+        frame_left.rowconfigure(1, weight=1) # Chart
+
+        # 1. Table
+        frame_costs = ctk.CTkFrame(frame_left, fg_color=self.col_card)
+        frame_costs.grid(row=0, column=0, sticky="nsew", pady=(0, 10))
 
         ctk.CTkLabel(frame_costs, text="Custos Operacionais", font=self.font_title).pack(pady=10)
 
         cols = ("id", "desc", "val")
-        self.tree_custos = ttk.Treeview(frame_costs, columns=cols, show="headings", height=15)
+        self.tree_custos = ttk.Treeview(frame_costs, columns=cols, show="headings", height=8)
         self.tree_custos.heading("desc", text="Descrição")
         self.tree_custos.heading("val", text="Valor (R$)")
         self.tree_custos.column("id", width=0, stretch=False)
@@ -722,11 +802,11 @@ class App(ctk.CTk):
         frame_input_costs.pack(fill="x", padx=10, pady=10)
 
         self.entry_desc_custo = ctk.CTkEntry(frame_input_costs, height=40, placeholder_text="Descrição",
-                                             fg_color=self.col_card, border_width=0)
+                                             fg_color=self.col_bg, border_width=0)
         self.entry_desc_custo.pack(side="left", fill="x", expand=True, padx=(0, 5))
 
         self.entry_valor_custo = ctk.CTkEntry(frame_input_costs, width=100, height=40, placeholder_text="0.00",
-                                              fg_color=self.col_card, border_width=0)
+                                              fg_color=self.col_bg, border_width=0)
         self.entry_valor_custo.pack(side="left", padx=5)
 
         ctk.CTkButton(frame_input_costs, text="+", width=40, command=self.add_custo_ui,
@@ -735,19 +815,32 @@ class App(ctk.CTk):
         ctk.CTkButton(frame_input_costs, text="🗑️", width=40, command=self.del_custo_ui,
                       fg_color="#EF4444", hover_color="#DC2626").pack(side="left", padx=5)
 
-        self.refresh_custos_ui()
+        # 2. Costs Chart
+        self.frame_cost_chart = ctk.CTkFrame(frame_left, fg_color=self.col_card)
+        self.frame_cost_chart.grid(row=1, column=0, sticky="nsew")
 
-        # --- RIGHT: Params ---
-        frame_params = ctk.CTkFrame(tab)
+        # --- RIGHT: Params & Tools ---
+        frame_params = ctk.CTkScrollableFrame(tab, fg_color="transparent")
         frame_params.grid(row=0, column=1, sticky="nsew", padx=10, pady=10)
 
-        ctk.CTkLabel(frame_params, text="Parâmetros Gerais", font=self.font_title).pack(pady=10)
+        ctk.CTkLabel(frame_params, text="Painel de Controle", font=self.font_title).pack(pady=10)
 
         cfg = self.db.get_config()
         # cfg: id, custo, horas, imposto, lucro, meta, nome
 
+        # -- Break-even Card --
+        self.frame_breakeven = ctk.CTkFrame(frame_params, fg_color=self.col_accent, corner_radius=10)
+        self.frame_breakeven.pack(fill="x", padx=10, pady=10)
+        self.lbl_breakeven = ctk.CTkLabel(self.frame_breakeven, text="Ponto de Equilíbrio", font=ctk.CTkFont(weight="bold", size=16), text_color="white")
+        self.lbl_breakeven.pack(pady=10)
+        self.lbl_breakeven_val = ctk.CTkLabel(self.frame_breakeven, text="...", font=self.font_label, text_color="white")
+        self.lbl_breakeven_val.pack(pady=(0, 10))
+
+        # -- General Config --
+        ctk.CTkLabel(frame_params, text="Parâmetros Gerais", font=self.font_subtitle).pack(pady=(20, 10))
+
         # Usuario
-        ctk.CTkLabel(frame_params, text="Nome de Usuário:", font=self.font_label).pack(anchor="w", padx=20)
+        ctk.CTkLabel(frame_params, text="Nome da Empresa:", font=self.font_label).pack(anchor="w", padx=20)
         self.entry_usuario = ctk.CTkEntry(frame_params, height=35, fg_color=self.col_card, border_width=0)
         self.entry_usuario.insert(0, cfg[6] if len(cfg)>6 else "Usuário")
         self.entry_usuario.pack(padx=20, fill="x", pady=(0,10))
@@ -804,6 +897,25 @@ class App(ctk.CTk):
         ctk.CTkButton(frame_params, text="💾 Salvar Configurações", command=self.save_config,
                       fg_color=self.col_success, hover_color="#059669").pack(pady=20, padx=20, fill="x")
 
+        # -- System Config --
+        ctk.CTkLabel(frame_params, text="Sistema", font=self.font_subtitle).pack(pady=(20, 10))
+
+        # Logo
+        btn_logo = ctk.CTkButton(frame_params, text="🖼️ Selecionar Logo (PDF)", command=self.select_logo,
+                      fg_color=self.col_card, hover_color=self.col_bg)
+        btn_logo.pack(fill="x", padx=20, pady=5)
+        self.lbl_logo_status = ctk.CTkLabel(frame_params, text="Nenhuma logo selecionada" if not os.path.exists("assets/user_logo.png") else "Logo salva ✅", font=ctk.CTkFont(size=10), text_color=self.col_text_muted)
+        self.lbl_logo_status.pack(pady=(0, 10))
+
+        # Appearance
+        switch_mode = ctk.CTkSwitch(frame_params, text="Modo Escuro", command=self.toggle_appearance, onvalue="Dark", offvalue="Light")
+        switch_mode.select()
+        switch_mode.pack(padx=20, pady=5)
+
+        # Logs
+        ctk.CTkButton(frame_params, text="📜 Ver Histórico de Alterações", command=self.view_change_log,
+                      fg_color=self.col_card, hover_color=self.col_bg).pack(fill="x", padx=20, pady=5)
+
         # Backup/Restore
         frame_bkp = ctk.CTkFrame(frame_params, fg_color="transparent")
         frame_bkp.pack(fill="x", padx=20, pady=10)
@@ -812,6 +924,78 @@ class App(ctk.CTk):
                       fg_color=self.col_card, hover_color=self.col_bg).pack(side="left", padx=5, expand=True)
         ctk.CTkButton(frame_bkp, text="🔄 Restore", command=self.restore_db, width=100,
                       fg_color="#EF4444", hover_color="#DC2626").pack(side="right", padx=5, expand=True)
+
+        # Factory Reset
+        ctk.CTkButton(frame_params, text="⚠️ Zerar Configurações de Fábrica", command=self.factory_reset,
+                      fg_color="transparent", border_width=1, border_color="#EF4444", text_color="#EF4444", hover_color="#7f1d1d").pack(fill="x", padx=20, pady=20)
+
+        # Initial updates
+        self.refresh_custos_ui()
+
+    def toggle_appearance(self):
+        current = ctk.get_appearance_mode()
+        if current == "Dark":
+            ctk.set_appearance_mode("Light")
+        else:
+            ctk.set_appearance_mode("Dark")
+
+    def select_logo(self):
+        filename = filedialog.askopenfilename(filetypes=[("Images", "*.png;*.jpg;*.jpeg")])
+        if filename:
+            try:
+                if not os.path.exists("assets"):
+                    os.makedirs("assets")
+                shutil.copy(filename, "assets/user_logo.png")
+                self.lbl_logo_status.configure(text="Logo salva ✅")
+                messagebox.showinfo("Sucesso", "Logo salva com sucesso!")
+            except Exception as e:
+                messagebox.showerror("Erro", str(e))
+
+    def view_change_log(self):
+        logs = self.db.get_change_log()
+        win = ctk.CTkToplevel(self)
+        win.title("Histórico de Alterações")
+        win.geometry("500x400")
+
+        txt = ctk.CTkTextbox(win)
+        txt.pack(fill="both", expand=True, padx=10, pady=10)
+
+        for ts, desc in logs:
+            txt.insert("end", f"[{ts}] {desc}\n\n")
+
+        txt.configure(state="disabled")
+
+    def factory_reset(self):
+        # ask for password
+        pwd = ctk.CTkInputDialog(text="Digite a senha de confirmação (admin):", title="Confirmação")
+        val = pwd.get_input()
+        if val == "admin":
+            if messagebox.askyesno("CONFIRMAR", "Isso apagará TODAS as configurações financeiras e custos, restaurando o padrão. Projetos serão mantidos. Continuar?"):
+                # Reset Config
+                self.db.cursor.execute("DELETE FROM configuracoes")
+                self.db.cursor.execute("DELETE FROM custos_operacionais")
+                self.db.seed_data()
+                self.db.log_change("FACTORY RESET realizado.")
+
+                # Refresh UI
+                self.refresh_custos_ui()
+                cfg = self.db.get_config()
+                self.entry_usuario.delete(0, 'end'); self.entry_usuario.insert(0, cfg[6])
+                self.entry_horas.delete(0, 'end'); self.entry_horas.insert(0, cfg[2])
+                self.entry_meta.delete(0, 'end'); self.entry_meta.insert(0, cfg[5])
+                self.slider_imposto.set(cfg[3])
+                self.slider_lucro.set(cfg[4])
+                self.update_slider_labels()
+                messagebox.showinfo("Reset", "Configurações restauradas.")
+        else:
+            messagebox.showerror("Erro", "Senha incorreta.")
+
+    def update_break_even_display(self):
+        hours, revenue, rate = self.calc.calcular_ponto_equilibrio()
+        if hours == 0:
+            self.lbl_breakeven_val.configure(text="Impossível calcular (verifique margens)")
+        else:
+            self.lbl_breakeven_val.configure(text=f"Venda {int(hours)} horas (R$ {revenue:.2f}) para pagar as contas.")
 
     def update_slider_labels(self, _=None):
         self.lbl_imposto_val.configure(text=f"{int(self.slider_imposto.get())}%")
@@ -890,11 +1074,14 @@ class App(ctk.CTk):
         if not selected: return
 
         item = self.tree_cat.item(selected[0])
-        vals = item['values'] # id, nome, horas, categoria
+        vals = item['values'] # id, nome, horas, categoria, tags, uso
 
         win = ctk.CTkToplevel(self)
         win.title("Editar Serviço")
-        win.geometry("300x300")
+        win.geometry("300x400")
+
+        # Focus management
+        win.after(100, lambda: e_nome.focus_set())
 
         ctk.CTkLabel(win, text="Nome:").pack(pady=5)
         e_nome = ctk.CTkEntry(win)
@@ -911,14 +1098,21 @@ class App(ctk.CTk):
         e_cat.set(vals[3])
         e_cat.pack(pady=5)
 
-        def save_edit():
-            self.db.cursor.execute("UPDATE catalogo_servicos SET nome=?, horas_padrao=?, categoria=? WHERE id=?",
-                                   (e_nome.get(), float(e_horas.get()), e_cat.get(), vals[0]))
-            self.db.conn.commit()
-            self.refresh_catalogo()
-            win.destroy()
+        ctk.CTkLabel(win, text="Tags:").pack(pady=5)
+        e_tags = ctk.CTkComboBox(win, values=["Interno", "Terceirizável", "Presencial", "Remoto"])
+        e_tags.set(vals[4] if len(vals) > 4 else "")
+        e_tags.pack(pady=5)
 
-        ctk.CTkButton(win, text="Salvar", command=save_edit).pack(pady=20)
+        def save_edit(event=None):
+            try:
+                self.db.update_servico(vals[0], e_nome.get(), float(e_horas.get()), e_cat.get(), e_tags.get())
+                self.refresh_catalogo()
+                win.destroy()
+            except ValueError:
+                messagebox.showerror("Erro", "Horas deve ser número.")
+
+        ctk.CTkButton(win, text="Salvar (Enter)", command=save_edit).pack(pady=20)
+        win.bind('<Return>', save_edit)
 
     # --- FUNÇÕES DE AÇÃO ---
 
@@ -931,6 +1125,31 @@ class App(ctk.CTk):
             self.tree_custos.insert("", "end", values=(c[0], c[1], f"R$ {c[2]:.2f}"))
             total += c[2]
         self.lbl_total_custos.configure(text=f"Total Calculado: R$ {total:.2f}")
+
+        # Update Chart
+        for w in self.frame_cost_chart.winfo_children(): w.destroy()
+
+        fig, ax = plt.subplots(figsize=(4, 4), dpi=100)
+        fig.patch.set_facecolor(self.col_card)
+        ax.set_facecolor(self.col_card)
+
+        if custos:
+            labels = [c[1] for c in custos]
+            sizes = [c[2] for c in custos]
+
+            # Group small slices if needed? simple for now
+            ax.pie(sizes, labels=labels, autopct='%1.1f%%', startangle=90, textprops=dict(color=self.col_text, fontsize=8))
+            ax.set_title("Distribuição de Custos", color="white")
+        else:
+            ax.text(0.5, 0.5, "Sem custos", ha='center', color="white")
+
+        canvas = FigureCanvasTkAgg(fig, master=self.frame_cost_chart)
+        canvas.draw()
+        canvas.get_tk_widget().pack(fill="both", expand=True, padx=5, pady=5)
+        plt.close(fig)
+
+        # Update Break Even
+        self.update_break_even_display()
 
     def add_custo_ui(self):
         desc = self.entry_desc_custo.get()
@@ -1186,6 +1405,10 @@ class App(ctk.CTk):
         self.db.cursor.execute("SELECT descricao, horas_estimadas FROM tarefas_projeto WHERE projeto_id=?", (proj_id,))
         tarefas = self.db.cursor.fetchall()
 
+        # Config Data
+        cfg = self.db.get_config()
+        empresa_nome = cfg[6] if len(cfg) > 6 else "Minha Empresa"
+
         filename = filedialog.asksaveasfilename(defaultextension=".pdf", filetypes=[("PDF Files", "*.pdf")])
         if not filename: return
 
@@ -1193,16 +1416,28 @@ class App(ctk.CTk):
             c = canvas.Canvas(filename, pagesize=A4)
             width, height = A4
 
+            # Logo
+            logo_path = "assets/user_logo.png"
+            if os.path.exists(logo_path):
+                # Draw image (x, y, w, h)
+                try:
+                    c.drawImage(logo_path, 50, height - 80, width=50, height=50, preserveAspectRatio=True, mask='auto')
+                    text_x = 110
+                except:
+                    text_x = 50
+            else:
+                text_x = 50
+
             # Header
             c.setFont("Helvetica-Bold", 20)
-            c.drawString(50, height - 50, "Okami Project Manager")
+            c.drawString(text_x, height - 50, empresa_nome)
             c.setFont("Helvetica", 10)
-            c.drawString(50, height - 70, f"Data da Proposta: {datetime.now().strftime('%d/%m/%Y')}")
+            c.drawString(text_x, height - 70, f"Data da Proposta: {datetime.now().strftime('%d/%m/%Y')}")
 
             # Client
             c.setFont("Helvetica-Bold", 12)
-            c.drawString(50, height - 110, f"Cliente: {cliente}")
-            c.drawString(50, height - 130, f"Projeto ID: #{proj_id}")
+            c.drawString(50, height - 120, f"Cliente: {cliente}")
+            c.drawString(50, height - 140, f"Projeto ID: #{proj_id}")
 
             # Scope Table
             y = height - 170
@@ -1263,20 +1498,47 @@ class App(ctk.CTk):
             self.tree_cat.delete(row)
 
         filter_cat = self.combo_cat_filter.get()
+        search_txt = self.entry_cat_search.get().lower()
         servicos = self.db.get_servicos()
 
+        # Update Most Profitable
+        prof_name, prof_rev = self.db.get_most_profitable_service()
+        if prof_name:
+            self.lbl_profitable.configure(text=f"🏆 Serviço Mais Rentável: {prof_name} (Gerou ~R$ {prof_rev:.2f})")
+        else:
+            self.lbl_profitable.configure(text="")
+
         for s in servicos:
-            # s = (id, nome, horas, categoria)
-            if filter_cat == "Todas" or s[3] == filter_cat:
-                self.tree_cat.insert("", "end", values=s)
+            # s = (id, nome, horas, categoria, tags)
+            id_s, nome, horas, cat, tags = s
+
+            # Filters
+            if filter_cat != "Todas" and cat != filter_cat: continue
+            if search_txt and search_txt not in nome.lower(): continue
+
+            # Icons
+            icon = ""
+            if "3D" in nome or "Modelagem" in nome: icon = "🧊"
+            elif "Planta" in nome or "Projeto" in nome: icon = "📐"
+            elif "Reunião" in nome: icon = "🗣️"
+            elif "Render" in nome: icon = "🖼️"
+
+            # Prepend icon to Category for visual aid
+            cat_display = f"{icon} {cat}" if icon else cat
+
+            # Usage
+            usage = self.db.get_service_usage_count(nome)
+
+            self.tree_cat.insert("", "end", values=(id_s, nome, horas, cat_display, tags, usage))
 
     def adicionar_servico_db(self):
         nome = self.entry_novo_servico.get()
         horas = self.entry_novas_horas.get()
         cat = self.combo_nova_cat.get()
+        tags = self.combo_tags.get()
         if nome and horas:
             try:
-                self.db.add_servico(nome, float(horas), cat)
+                self.db.add_servico(nome, float(horas), cat, tags)
                 self.refresh_catalogo()
                 self.entry_novo_servico.delete(0, 'end')
                 self.entry_novas_horas.delete(0, 'end')
@@ -1291,7 +1553,15 @@ class App(ctk.CTk):
         if selected:
             item = self.tree_cat.item(selected[0])
             id_servico = item['values'][0]
-            confirm = messagebox.askyesno("Confirmar", f"Excluir '{item['values'][1]}' do catálogo?")
+            nome_servico = item['values'][1]
+
+            # Validation
+            usage = self.db.get_service_usage_count(nome_servico)
+            if usage > 0:
+                messagebox.showerror("Bloqueado", f"O serviço '{nome_servico}' está em uso em {usage} tarefas de projetos. Não pode ser excluído por segurança.")
+                return
+
+            confirm = messagebox.askyesno("Confirmar", f"Excluir '{nome_servico}' do catálogo?")
             if confirm:
                 self.db.delete_servico(id_servico)
                 self.refresh_catalogo()
@@ -1306,6 +1576,7 @@ class App(ctk.CTk):
             nome = self.entry_usuario.get()
 
             self.db.update_config(c, h, i, l, meta, nome)
+            self.update_break_even_display()
             messagebox.showinfo("Sucesso", "Dados Financeiros Atualizados!")
         except ValueError:
             messagebox.showerror("Erro", "Verifique os números digitados.")

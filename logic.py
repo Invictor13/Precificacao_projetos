@@ -77,3 +77,34 @@ class CalculadoraPreco:
             "impostos_reais": impostos_reais,
             "dias_uteis": self.calcular_dias_uteis(horas_totais)
         }
+
+    def calcular_ponto_equilibrio(self):
+        # 1. Custos Fixos Totais
+        custos_fixos = self.db.get_total_custos_operacionais()
+
+        # 2. Preço Médio de Venda da Hora
+        # Usamos a eficiência real (média vendida) ou a técnica?
+        # Para ser realista ("quanto eu REALMENTE preciso vender"), usamos a média histórica recente.
+        real_rate, tech_cost = self.db.get_hourly_efficiency() # Pega histórico geral ou ano? Padrão é geral.
+
+        if real_rate <= 0:
+            # Fallback para hora técnica + margem padrão se não tiver vendas
+            cfg = self.db.get_config()
+            lucro_padrao = (cfg[4]/100) if cfg else 0.3
+            real_rate = tech_cost * (1 + lucro_padrao) # Aproximação
+
+        # 3. Imposto Médio
+        cfg = self.db.get_config()
+        imposto_pct = (cfg[3] / 100) if cfg else 0.0
+
+        # Margem de Contribuição por Hora = Preço - (Preço * Imposto)
+        # Assumindo que não há custos variáveis por hora (materiais) além do imposto, já que custos operacionais são fixos.
+        margem_contrib_hora = real_rate * (1 - imposto_pct)
+
+        if margem_contrib_hora <= 0:
+            return 0, 0, 0 # Impossível pagar
+
+        horas_necessarias = custos_fixos / margem_contrib_hora
+        receita_necessaria = horas_necessarias * real_rate
+
+        return horas_necessarias, receita_necessaria, real_rate
