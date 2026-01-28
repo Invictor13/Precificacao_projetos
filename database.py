@@ -1,5 +1,6 @@
 import sqlite3
 import datetime
+import re
 
 class Database:
     def __init__(self, db_name="meus_projetos.db"):
@@ -465,3 +466,82 @@ class Database:
         tech_hourly_cost = custo_operacional_total / horas_mensais if horas_mensais > 0 else 0.0
 
         return real_hourly_rate, tech_hourly_cost
+
+    def search_projects(self, query=None, sort_by=None):
+        sql = "SELECT id, cliente, data_entrega, status, preco_final, data_atualizacao, categoria FROM projetos"
+        params = []
+        where_clauses = []
+
+        if query:
+            query = query.strip()
+            # Check for operators
+            if query.startswith((">=", "<=", ">", "<", "=")):
+                # Extract operator and number
+                match = re.match(r"(>=|<=|>|<|=)\s*(\d+(\.\d+)?)", query)
+                if match:
+                    op, val = match.groups()[0], float(match.groups()[1])
+                    where_clauses.append(f"preco_final {op} ?")
+                    params.append(val)
+                else:
+                    # Fallback to text if parsing fails
+                    where_clauses.append("(cliente LIKE ? OR categoria LIKE ? OR CAST(id AS TEXT) LIKE ?)")
+                    params.extend([f"%{query}%", f"%{query}%", f"%{query}%"])
+            else:
+                 where_clauses.append("(cliente LIKE ? OR categoria LIKE ? OR CAST(id AS TEXT) LIKE ?)")
+                 params.extend([f"%{query}%", f"%{query}%", f"%{query}%"])
+
+        if where_clauses:
+            sql += " WHERE " + " AND ".join(where_clauses)
+
+        # Sorting
+        if sort_by:
+            if "Maior" in sort_by:
+                sql += " ORDER BY preco_final DESC"
+            elif "Menor" in sort_by:
+                sql += " ORDER BY preco_final ASC"
+            elif "Recente" in sort_by:
+                sql += " ORDER BY data_atualizacao DESC"
+            elif "Antigo" in sort_by:
+                sql += " ORDER BY data_atualizacao ASC"
+            else:
+                sql += " ORDER BY id DESC"
+        else:
+            sql += " ORDER BY id DESC"
+
+        self.cursor.execute(sql, params)
+        return self.cursor.fetchall()
+
+    def duplicate_project(self, original_id):
+        # 1. Fetch Original
+        self.cursor.execute("SELECT * FROM projetos WHERE id=?", (original_id,))
+        orig = self.cursor.fetchone()
+        if not orig: return
+
+        # orig columns depend on the SELECT * order.
+        # Typically: id, cliente, data_criacao, data_entrega, status, custo_extras, preco_final, categoria, data_atualizacao
+        # Let's map safely by index if schema is stable, or use row_factory if available.
+        # Given create_tables order:
+        # 0:id, 1:cliente, 2:data_criacao, 3:data_entrega, 4:status, 5:custo_extras, 6:preco_final, 7:categoria, 8:data_atualizacao
+
+        new_client = orig[1] + " (Cópia)"
+        now_date = datetime.datetime.now().strftime("%Y-%m-%d")
+        now_ts = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+        # Copy data but reset status to 'Orçamento' and update dates
+        self.cursor.execute("""
+            INSERT INTO projetos (cliente, data_criacao, data_entrega, status, custo_extras, preco_final, categoria, data_atualizacao)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """, (new_client, now_date, orig[3], "Orçamento", orig[5], orig[6], orig[7], now_ts))
+
+        new_id = self.cursor.lastrowid
+
+        # 2. Copy Tasks
+        self.cursor.execute("SELECT descricao, horas_estimadas FROM tarefas_projeto WHERE projeto_id=?", (original_id,))
+        tasks = self.cursor.fetchall()
+
+        for t in tasks:
+            self.cursor.execute("INSERT INTO tarefas_projeto (projeto_id, descricao, horas_estimadas) VALUES (?, ?, ?)",
+                                (new_id, t[0], t[1]))
+
+        self.conn.commit()
+        return new_id
