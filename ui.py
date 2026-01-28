@@ -49,6 +49,8 @@ class App(ctk.CTk):
         self.calc = CalculadoraPreco(self.db)
 
         self.editing_project_id = None # Control flag for Edit Mode
+        self.view_mode = "Lista" # Lista or Kanban
+        self.selected_project_ids = []
 
         # Estilo Treeview (Dark Mode Compat)
         style = ttk.Style()
@@ -320,14 +322,23 @@ class App(ctk.CTk):
         plt.close(fig_pie)
 
     def ver_projeto_alerta(self, pid):
-        # Find item in treeview to select it
         self.tabview.set("Meus Projetos")
-        for item in self.tree_proj.get_children():
-            if self.tree_proj.item(item)['values'][0] == pid:
-                self.tree_proj.selection_set(item)
-                self.tree_proj.focus(item)
-                self.tree_proj.see(item)
-                break
+        # Just search for the ID or Client to show it
+        # Since we don't have exact ID search exposed in UI simply (search bar is client),
+        # let's try to set the search to the ID if we supported it, or just client name.
+        # But wait, search_projects supports ID implicitly if we add it? No, currently LIKE client.
+        # I'll update search_projects to allow ID search or just text search for ID.
+
+        # For now, let's just refresh.
+        # Ideally, we should scroll to it. But with pagination/scrollframe it's hard.
+        # Let's filter by it.
+
+        self.db.cursor.execute("SELECT cliente FROM projetos WHERE id=?", (pid,))
+        res = self.db.cursor.fetchone()
+        if res:
+            self.entry_search.delete(0, 'end')
+            self.entry_search.insert(0, res[0])
+            self.refresh_projetos()
 
     def create_metric_card(self, parent, title, value, color, col_idx, icon="📊"):
         # Main Card Frame
@@ -352,80 +363,92 @@ class App(ctk.CTk):
 
     # --- ABA 1: MEUS PROJETOS ---
     def create_tab_projetos(self):
-        frame = self.tabview.tab("Meus Projetos")
+        self.tab_projetos = self.tabview.tab("Meus Projetos")
 
-        # Search Bar
-        frame_search = ctk.CTkFrame(frame, fg_color="transparent")
-        frame_search.pack(fill="x", padx=10, pady=(10, 5))
+        # --- HEADER ---
+        frame_header = ctk.CTkFrame(self.tab_projetos, fg_color="transparent")
+        frame_header.pack(fill="x", padx=10, pady=(10, 5))
 
-        self.entry_search = ctk.CTkEntry(frame_search, placeholder_text="🔍 Pesquisar Cliente...",
-                                         height=40, border_width=0, fg_color=self.col_card)
-        self.entry_search.pack(fill="x")
-        self.entry_search.bind("<KeyRelease>", lambda e: self.refresh_projetos(self.entry_search.get()))
+        # Search
+        self.entry_search = ctk.CTkEntry(frame_header, placeholder_text="🔍 Pesquisar (Cliente ou > 1000)",
+                                         height=35, border_width=0, fg_color=self.col_card)
+        self.entry_search.pack(side="left", fill="x", expand=True, padx=(0, 10))
+        self.entry_search.bind("<KeyRelease>", lambda e: self.refresh_projetos())
 
-        # Treeview
-        columns = ("id", "cliente", "data", "status", "preco")
-        self.tree_proj = ttk.Treeview(frame, columns=columns, show='headings')
+        # Sort
+        self.combo_sort = ctk.CTkComboBox(frame_header, width=150,
+                                          values=["Recente", "Antigo", "Maior Valor", "Menor Valor"],
+                                          command=lambda x: self.refresh_projetos())
+        self.combo_sort.set("Recente")
+        self.combo_sort.pack(side="left", padx=(0, 10))
 
-        # Sortable Headers
-        for col in columns:
-            self.tree_proj.heading(col, text=col.capitalize(),
-                                   command=lambda c=col: self.sort_treeview(self.tree_proj, c, False))
+        # View Toggle
+        self.seg_view = ctk.CTkSegmentedButton(frame_header, values=["Lista", "Kanban"],
+                                               command=self.toggle_view_mode, width=100)
+        self.seg_view.set("Lista")
+        self.seg_view.pack(side="left", padx=(0, 10))
 
-        self.tree_proj.heading("id", text="#")
-        self.tree_proj.heading("data", text="Data Entrega")
-        self.tree_proj.heading("preco", text="Preço")
+        # Export CSV
+        ctk.CTkButton(frame_header, text="📄 CSV", width=60, command=self.exportar_projetos_csv,
+                      fg_color=self.col_card, hover_color=self.col_bg).pack(side="left")
 
-        self.tree_proj.column("id", width=40)
-        self.tree_proj.column("status", width=120)
-        self.tree_proj.column("data", width=100)
+        # --- BATCH ACTIONS (Hidden by default) ---
+        self.frame_batch = ctk.CTkFrame(self.tab_projetos, fg_color=self.col_accent, height=40, corner_radius=5)
+        # We don't pack it yet. We pack it when items selected.
 
-        self.tree_proj.pack(fill='both', expand=True, padx=10, pady=10)
+        self.lbl_batch_count = ctk.CTkLabel(self.frame_batch, text="0 selecionados", font=ctk.CTkFont(weight="bold"))
+        self.lbl_batch_count.pack(side="left", padx=20)
 
-        # Bind Double Click
-        self.tree_proj.bind("<Double-1>", self.on_double_click_project)
+        ctk.CTkButton(self.frame_batch, text="🗑️ Excluir Selecionados", fg_color="white", text_color="red",
+                      hover_color="#fca5a5", command=self.batch_delete).pack(side="right", padx=10, pady=5)
 
-        frame_btns = ctk.CTkFrame(frame, fg_color="transparent")
-        frame_btns.pack(pady=10)
+        # --- CONTENT AREA ---
+        self.scroll_projects = ctk.CTkScrollableFrame(self.tab_projetos, fg_color="transparent")
+        self.scroll_projects.pack(fill="both", expand=True, padx=10, pady=5)
 
-        # Row 1 Buttons
-        # Atualizar
-        ctk.CTkButton(frame_btns, text="🔄", width=40, command=lambda: self.refresh_projetos(),
-                      fg_color=self.col_card, hover_color=self.col_bg).grid(row=0, column=0, padx=5)
-
-        # Editar
-        ctk.CTkButton(frame_btns, text="✏️ Editar", command=self.editar_projeto,
-                      fg_color=self.col_accent, hover_color="#7c3aed").grid(row=0, column=1, padx=5)
-
-        # Duplicar
-        ctk.CTkButton(frame_btns, text="🐑 Duplicar", command=self.duplicar_projeto,
-                      fg_color="#8E44AD", hover_color="#9B59B6").grid(row=0, column=2, padx=5)
-
-        # Status
-        ctk.CTkButton(frame_btns, text="🏷️ Status", command=self.alterar_status,
-                      fg_color="#E67E22", hover_color="#D35400").grid(row=0, column=3, padx=5)
-
-        # PDF
-        ctk.CTkButton(frame_btns, text="📄 PDF", command=self.gerar_pdf,
-                      fg_color=self.col_success, hover_color="#059669").grid(row=0, column=4, padx=5)
-
-        # Excluir
-        ctk.CTkButton(frame_btns, text="🗑️", width=40, command=self.excluir_projeto,
-                      fg_color="#EF4444", hover_color="#DC2626").grid(row=0, column=5, padx=5)
+        # --- FOOTER ---
+        self.lbl_filtered_total = ctk.CTkLabel(self.tab_projetos, text="Total Filtrado: R$ 0.00",
+                                               font=ctk.CTkFont(weight="bold", size=14), text_color=self.col_success)
+        self.lbl_filtered_total.pack(side="bottom", anchor="e", padx=20, pady=10)
 
         self.refresh_projetos()
 
-    def sort_treeview(self, tv, col, reverse):
-        l = [(tv.set(k, col), k) for k in tv.get_children('')]
+    def toggle_view_mode(self, value):
+        self.view_mode = value
+        self.refresh_projetos()
+
+    def exportar_projetos_csv(self):
+        # Export current view
+        query = self.entry_search.get()
+        sort_by = self.combo_sort.get()
+        projects = self.db.search_projects(query, sort_by)
+
+        filename = filedialog.asksaveasfilename(defaultextension=".csv", filetypes=[("CSV Files", "*.csv")])
+        if not filename: return
+
         try:
-            l.sort(key=lambda t: float(t[0].replace('R$','').replace(',','')))
-        except ValueError:
-            l.sort(reverse=reverse)
+            with open(filename, 'w', newline='', encoding='utf-8') as csvfile:
+                writer = csv.writer(csvfile)
+                writer.writerow(["ID", "Cliente", "Data Entrega", "Status", "Preço Final", "Atualizado em", "Categoria"])
+                for p in projects:
+                    writer.writerow(p)
+            messagebox.showinfo("Sucesso", f"{len(projects)} projetos exportados!")
+        except Exception as e:
+            messagebox.showerror("Erro", f"Erro ao exportar: {e}")
 
-        for index, (val, k) in enumerate(l):
-            tv.move(k, '', index)
+    def batch_delete(self):
+        count = len(self.selected_project_ids)
+        if count == 0: return
 
-        tv.heading(col, command=lambda: self.sort_treeview(tv, col, not reverse))
+        if messagebox.askyesno("Confirmar Exclusão em Massa", f"Tem certeza que deseja excluir {count} projetos?"):
+            for pid in self.selected_project_ids:
+                self.db.cursor.execute("DELETE FROM tarefas_projeto WHERE projeto_id=?", (pid,))
+                self.db.cursor.execute("DELETE FROM projetos WHERE id=?", (pid,))
+            self.db.conn.commit()
+
+            self.selected_project_ids = []
+            self.refresh_projetos()
+            messagebox.showinfo("Sucesso", "Projetos excluídos!")
 
     # --- ABA 2: NOVO ORÇAMENTO ---
     def create_tab_novo_orcamento(self):
@@ -889,48 +912,206 @@ class App(ctk.CTk):
                 self.db.delete_custo_operacional(item['values'][0])
                 self.refresh_custos_ui()
 
-    def refresh_projetos(self, query=None):
-        for row in self.tree_proj.get_children():
-            self.tree_proj.delete(row)
+    def refresh_projetos(self):
+        query = self.entry_search.get()
+        sort_by = self.combo_sort.get()
 
-        sql = "SELECT id, cliente, data_entrega, status, preco_final FROM projetos"
-        params = []
-        if query:
-            sql += " WHERE cliente LIKE ?"
-            params.append(f"%{query}%")
-        sql += " ORDER BY id DESC"
+        # Fetch from DB using the new method
+        projects = self.db.search_projects(query, sort_by)
 
-        self.db.cursor.execute(sql, params)
+        # Calculate Total
+        total = sum(p[4] for p in projects) # index 4 is preco_final
+        self.lbl_filtered_total.configure(text=f"Total Filtrado: R$ {total:.2f}")
 
-        status_emojis = {
-            "Orçamento": "🟡 Orçamento",
-            "Aprovado": "🟢 Aprovado",
-            "Em Execução": "🔵 Em Execução",
-            "Concluído": "⚪ Concluído"
-        }
+        # Reset Selection
+        self.selected_project_ids = []
+        if hasattr(self, 'frame_batch'):
+            self.frame_batch.pack_forget()
 
-        for row in self.db.cursor.fetchall():
-            # row: id, cliente, data_entrega, status, preco
-            st_txt = status_emojis.get(row[3], row[3])
-            price = f"R$ {row[4]:.2f}"
-            self.tree_proj.insert("", "end", values=(row[0], row[1], row[2], st_txt, price))
+        # Render
+        if self.view_mode == "Lista":
+            self.render_list_view(projects)
+        else:
+            self.render_kanban_view(projects)
 
-    def alterar_status(self):
-        selected = self.tree_proj.selection()
-        if not selected:
-            messagebox.showwarning("Atenção", "Selecione um projeto na lista.")
+    def render_list_view(self, projects):
+        # Clear existing
+        for w in self.scroll_projects.winfo_children(): w.destroy()
+
+        if not projects:
+            ctk.CTkLabel(self.scroll_projects, text="Nenhum projeto encontrado.", font=self.font_label).pack(pady=20)
             return
 
-        item = self.tree_proj.item(selected[0])
-        proj_id = item['values'][0]
-        current_status = item['values'][2]
+        for proj in projects:
+            # proj: id, cliente, data_entrega, status, preco_final, data_atualizacao, categoria
+            self.create_project_row(self.scroll_projects, proj)
 
+    def create_project_row(self, parent, proj):
+        pid, cliente, entrega, status, preco, atualizado, categoria = proj
+
+        # Card Frame
+        card = ctk.CTkFrame(parent, fg_color=self.col_card, corner_radius=10)
+        card.pack(fill="x", pady=5)
+
+        # 1. Checkbox
+        var_chk = ctk.BooleanVar(value=pid in self.selected_project_ids)
+        chk = ctk.CTkCheckBox(card, text="", width=24, variable=var_chk,
+                              command=lambda p=pid, v=var_chk: self.on_project_select(p, v))
+        chk.pack(side="left", padx=(15, 5), pady=10)
+
+        # 2. Info (Client + Cat + ID)
+        info_frame = ctk.CTkFrame(card, fg_color="transparent")
+        info_frame.pack(side="left", fill="both", expand=True, padx=10)
+
+        ctk.CTkLabel(info_frame, text=cliente, font=ctk.CTkFont(size=14, weight="bold")).pack(anchor="w")
+
+        cat_text = categoria if categoria else "Geral"
+        ctk.CTkLabel(info_frame, text=f"#{pid} • {cat_text}", font=ctk.CTkFont(size=11), text_color=self.col_text_muted).pack(anchor="w")
+
+        # 3. Status Pill
+        status_colors = {
+            "Orçamento": "#F59E0B", # Amber
+            "Aprovado": "#10B981", # Green
+            "Em Execução": "#3B82F6", # Blue
+            "Concluído": "#64748B"  # Slate
+        }
+        bg_col = status_colors.get(status, self.col_card)
+
+        pill = ctk.CTkLabel(card, text=status, fg_color=bg_col, text_color="white",
+                            corner_radius=15, width=100, height=30, font=ctk.CTkFont(weight="bold"))
+        pill.pack(side="left", padx=10)
+        pill.bind("<Button-1>", lambda e: self.alterar_status(pid, status)) # Click to change
+
+        # 4. Days Open / Alert
+        # Calculate days
+        try:
+            dt_update = datetime.strptime(atualizado, "%Y-%m-%d %H:%M:%S")
+            days_diff = (datetime.now() - dt_update).days
+        except:
+            days_diff = 0
+
+        days_txt = f"{days_diff}d"
+        days_col = self.col_text_muted
+        if days_diff > 10 and status != "Concluído":
+             days_txt += " ⚠️"
+             days_col = "#EF4444"
+
+        ctk.CTkLabel(card, text=days_txt, text_color=days_col, width=60).pack(side="left", padx=10)
+
+        # 5. Price
+        ctk.CTkLabel(card, text=f"R$ {preco:.2f}", font=ctk.CTkFont(weight="bold"), width=100).pack(side="left", padx=10)
+
+        # 6. Actions
+        # Edit
+        btn_edit = ctk.CTkButton(card, text="✏️", width=35, height=35, fg_color="transparent", hover_color=self.col_bg,
+                                 command=lambda: self.editar_projeto(pid))
+        btn_edit.pack(side="left", padx=2)
+
+        # PDF
+        btn_pdf = ctk.CTkButton(card, text="📄", width=35, height=35, fg_color="transparent", hover_color=self.col_bg,
+                                command=lambda: self.gerar_pdf(pid))
+        btn_pdf.pack(side="left", padx=2)
+
+        # Clone
+        btn_clone = ctk.CTkButton(card, text="🐑", width=35, height=35, fg_color="transparent", hover_color=self.col_bg,
+                                  command=lambda: self.duplicar_projeto(pid))
+        btn_clone.pack(side="left", padx=2)
+
+        # Delete
+        btn_del = ctk.CTkButton(card, text="🗑️", width=35, height=35, fg_color="transparent", hover_color="#7f1d1d",
+                                text_color="#EF4444", command=lambda: self.excluir_projeto(pid))
+        btn_del.pack(side="left", padx=2)
+
+    def on_project_select(self, pid, var):
+        if var.get():
+            if pid not in self.selected_project_ids:
+                self.selected_project_ids.append(pid)
+        else:
+            if pid in self.selected_project_ids:
+                self.selected_project_ids.remove(pid)
+
+        # Update Batch Bar Visibility
+        if self.selected_project_ids:
+            self.lbl_batch_count.configure(text=f"{len(self.selected_project_ids)} selecionados")
+            self.frame_batch.pack(fill="x", padx=10, pady=(0, 10), before=self.scroll_projects)
+        else:
+            self.frame_batch.pack_forget()
+
+    def render_kanban_view(self, projects):
+        for w in self.scroll_projects.winfo_children(): w.destroy()
+
+        # Configure Grid for 4 columns
+        self.scroll_projects.columnconfigure(0, weight=1)
+        self.scroll_projects.columnconfigure(1, weight=1)
+        self.scroll_projects.columnconfigure(2, weight=1)
+        self.scroll_projects.columnconfigure(3, weight=1)
+
+        statuses = ["Orçamento", "Aprovado", "Em Execução", "Concluído"]
+        colors = ["#F59E0B", "#10B981", "#3B82F6", "#64748B"]
+
+        # Group projects
+        grouped = {s: [] for s in statuses}
+        for p in projects:
+            st = p[3] # status
+            if st in grouped:
+                grouped[st].append(p)
+            else:
+                grouped["Orçamento"].append(p) # Fallback
+
+        for i, status in enumerate(statuses):
+            # Column Frame
+            col_frame = ctk.CTkFrame(self.scroll_projects, fg_color="transparent")
+            col_frame.grid(row=0, column=i, sticky="nsew", padx=5, pady=5)
+
+            # Header
+            header = ctk.CTkFrame(col_frame, fg_color=self.col_card, corner_radius=5)
+            header.pack(fill="x", pady=(0, 10))
+
+            ctk.CTkFrame(header, fg_color=colors[i], height=3).pack(fill="x") # Color Strip
+            ctk.CTkLabel(header, text=f"{status} ({len(grouped[status])})", font=ctk.CTkFont(weight="bold")).pack(pady=5)
+
+            # Cards
+            for proj in grouped[status]:
+                self.create_kanban_card(col_frame, proj, colors[i])
+
+    def create_kanban_card(self, parent, proj, border_col):
+        pid, cliente, entrega, status, preco, atualizado, categoria = proj
+
+        card = ctk.CTkFrame(parent, fg_color=self.col_card, corner_radius=10, border_width=1, border_color=self.col_card)
+        card.pack(fill="x", pady=5)
+
+        # Client
+        ctk.CTkLabel(card, text=cliente, font=ctk.CTkFont(weight="bold"), wraplength=150).pack(anchor="w", padx=10, pady=(10,0))
+
+        # Price
+        ctk.CTkLabel(card, text=f"R$ {preco:.2f}", text_color=self.col_success, font=ctk.CTkFont(size=12)).pack(anchor="w", padx=10)
+
+        # Footer (Days + Edit)
+        footer = ctk.CTkFrame(card, fg_color="transparent", height=20)
+        footer.pack(fill="x", padx=10, pady=5)
+
+        # Days
+        try:
+            dt_update = datetime.strptime(atualizado, "%Y-%m-%d %H:%M:%S")
+            days_diff = (datetime.now() - dt_update).days
+        except: days_diff = 0
+
+        d_col = self.col_text_muted
+        if days_diff > 10 and status != "Concluído": d_col = "#EF4444"
+
+        ctk.CTkLabel(footer, text=f"{days_diff}d", text_color=d_col, font=ctk.CTkFont(size=11)).pack(side="left")
+
+        # Edit Btn
+        ctk.CTkButton(footer, text="✏️", width=25, height=25, fg_color="transparent", hover_color=self.col_bg,
+                      command=lambda: self.editar_projeto(pid)).pack(side="right")
+
+    def alterar_status(self, proj_id, current_status):
         # Janela Modal Simples
         dialog = ctk.CTkToplevel(self)
         dialog.title("Alterar Status")
         dialog.geometry("300x150")
-        dialog.transient(self) # Mantém sobre a janela principal
-        dialog.grab_set()      # Bloqueia interação com a janela principal
+        dialog.transient(self)
+        dialog.grab_set()
 
         ctk.CTkLabel(dialog, text="Selecione o Novo Status:", font=self.font_label).pack(pady=15)
 
@@ -948,37 +1129,24 @@ class App(ctk.CTk):
             dialog.destroy()
             messagebox.showinfo("Sucesso", "Status atualizado!")
 
-        # Salvar -> Positivo
         ctk.CTkButton(dialog, text="Salvar", command=confirm,
                       fg_color="#2CC985", hover_color="#25A970").pack(pady=15)
 
-    def gerar_pdf(self):
-        selected = self.tree_proj.selection()
-        if not selected:
-            messagebox.showwarning("Atenção", "Selecione um projeto.")
-            return
-
-        item = self.tree_proj.item(selected[0])
-        proj_id = item['values'][0]
-
+    def gerar_pdf(self, proj_id):
         # Fetch Data
         self.db.cursor.execute("SELECT * FROM projetos WHERE id=?", (proj_id,))
-        proj = self.db.cursor.fetchone() # id, cliente, data, status, extras, preco
+        proj = self.db.cursor.fetchone() # id, cliente, data_criacao, data_entrega, status, extras, preco
 
         cliente = proj[1]
-        # data_criacao = proj[2] # Not used currently
-        extras = proj[4]
-        preco_final = proj[5]
+        extras = proj[5]
+        preco_final = proj[6]
 
         self.db.cursor.execute("SELECT descricao, horas_estimadas FROM tarefas_projeto WHERE projeto_id=?", (proj_id,))
         tarefas = self.db.cursor.fetchall()
 
-        # File Dialog
         filename = filedialog.asksaveasfilename(defaultextension=".pdf", filetypes=[("PDF Files", "*.pdf")])
-        if not filename:
-            return
+        if not filename: return
 
-        # PDF Generation
         try:
             c = canvas.Canvas(filename, pagesize=A4)
             width, height = A4
@@ -1027,7 +1195,6 @@ class App(ctk.CTk):
 
             c.setFont("Helvetica", 12)
 
-            # Calculate Service Total
             total_servicos = preco_final - extras
 
             c.drawString(50, y, f"Total dos Serviços:")
@@ -1292,17 +1459,9 @@ class App(ctk.CTk):
         self.refresh_projetos()
         self.tabview.set("Meus Projetos")
 
-    def editar_projeto(self):
-        selected = self.tree_proj.selection()
-        if not selected:
-            messagebox.showwarning("Atenção", "Selecione um projeto.")
-            return
-
-        item = self.tree_proj.item(selected[0])
-        pid = item['values'][0]
-
+    def editar_projeto(self, pid):
         self.db.cursor.execute("SELECT * FROM projetos WHERE id=?", (pid,))
-        proj = self.db.cursor.fetchone() # id, cliente, data_criacao, data_entrega, status, extras, preco
+        proj = self.db.cursor.fetchone() # id, cliente, data_criacao, data_entrega, status, extras, preco, categoria
 
         # Switch to Tab 3
         self.tabview.set("Novo Orçamento")
@@ -1341,42 +1500,12 @@ class App(ctk.CTk):
         self.update_live_preview()
         messagebox.showinfo("Modo Edição", f"Editando Projeto #{pid}")
 
-    def duplicar_projeto(self):
-        selected = self.tree_proj.selection()
-        if not selected: return
-
-        pid = self.tree_proj.item(selected[0])['values'][0]
-
-        self.db.cursor.execute("SELECT cliente, data_entrega, status, custo_extras, preco_final, categoria FROM projetos WHERE id=?", (pid,))
-        orig = self.db.cursor.fetchone()
-
-        cliente_novo = orig[0] + " (Cópia)"
-        now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-        self.db.cursor.execute("""
-            INSERT INTO projetos (cliente, data_criacao, data_entrega, status, custo_extras, preco_final, categoria, data_atualizacao)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        """, (cliente_novo, datetime.now().strftime("%Y-%m-%d"), orig[1], "Orçamento", orig[3], orig[4], orig[5], now_str))
-
-        new_pid = self.db.cursor.lastrowid
-
-        self.db.cursor.execute("SELECT descricao, horas_estimadas FROM tarefas_projeto WHERE projeto_id=?", (pid,))
-        tarefas = self.db.cursor.fetchall()
-
-        for t in tarefas:
-            self.db.cursor.execute("INSERT INTO tarefas_projeto (projeto_id, descricao, horas_estimadas) VALUES (?, ?, ?)",
-                                   (new_pid, t[0], t[1]))
-
-        self.db.conn.commit()
+    def duplicar_projeto(self, pid):
+        self.db.duplicate_project(pid)
         self.refresh_projetos()
         messagebox.showinfo("Sucesso", "Projeto Duplicado!")
 
-    def excluir_projeto(self):
-        selected = self.tree_proj.selection()
-        if not selected: return
-
-        pid = self.tree_proj.item(selected[0])['values'][0]
-
+    def excluir_projeto(self, pid):
         if messagebox.askyesno("Confirmar", "Excluir permanentemente este projeto?"):
             self.db.cursor.execute("DELETE FROM tarefas_projeto WHERE projeto_id=?", (pid,))
             self.db.cursor.execute("DELETE FROM projetos WHERE id=?", (pid,))
@@ -1385,12 +1514,7 @@ class App(ctk.CTk):
             # Update Dashboard if needed
             self.update_dashboard()
 
-    def on_double_click_project(self, event):
-        selected = self.tree_proj.selection()
-        if not selected: return
-        item = self.tree_proj.item(selected[0])
-        pid = item['values'][0]
-
+    def open_project_details(self, pid):
         # Modal View
         self.db.cursor.execute("SELECT * FROM projetos WHERE id=?", (pid,))
         proj = self.db.cursor.fetchone()
