@@ -459,11 +459,11 @@ class App(ctk.CTk):
         tab.columnconfigure(1, weight=1) # Preview
         tab.rowconfigure(0, weight=1)
 
-        # Left: Form
-        self.frame_orc_form = ctk.CTkFrame(tab, fg_color="transparent")
+        # Left: Form (Scrollable)
+        self.frame_orc_form = ctk.CTkScrollableFrame(tab, fg_color="transparent")
         self.frame_orc_form.grid(row=0, column=0, sticky="nsew", padx=10, pady=10)
 
-        # Right: Preview (Sidebar style)
+        # Right: Preview (Sticky Sidebar)
         self.frame_orc_preview = ctk.CTkFrame(tab, fg_color=self.col_card, corner_radius=15, border_width=1, border_color="#334155")
         self.frame_orc_preview.grid(row=0, column=1, sticky="nsew", padx=10, pady=10)
 
@@ -473,10 +473,20 @@ class App(ctk.CTk):
         f_client.pack(fill="x", pady=5)
 
         ctk.CTkLabel(f_client, text="Cliente:", font=self.font_label).pack(anchor="w")
-        self.entry_cliente = ctk.CTkEntry(f_client, height=40, placeholder_text="Nome do Cliente",
-                                          fg_color=self.col_card, border_width=0)
-        self.entry_cliente.pack(fill="x", pady=(2, 10))
-        self.entry_cliente.bind("<KeyRelease>", self.update_live_preview) # Live Update
+        # Autocomplete Logic: Using ComboBox seeded with DB clients
+        self.combo_cliente = ctk.CTkComboBox(f_client, height=40, fg_color=self.col_card, border_width=0,
+                                             command=lambda x: self.update_live_preview())
+        self.combo_cliente.set("")
+        self.combo_cliente.pack(fill="x", pady=(2, 10))
+        # Initial populate
+        self.update_client_autocomplete()
+
+        # Bind KeyRelease to update preview? ComboBox entry is harder to bind directly in ctk.
+        # But `command` handles selection.
+        # Ideally we want `KeyRelease` on the internal entry to update preview too.
+        # Currently CTkComboBox doesn't expose entry bind easily in high level,
+        # but user typing sets the variable. We can trace it if we used a variable,
+        # or bind to the internal widget if needed. For now, rely on selection or Enter.
 
         ctk.CTkLabel(f_client, text="Categoria do Projeto:", font=self.font_label).pack(anchor="w")
         self.combo_categoria = ctk.CTkComboBox(f_client, values=["Residencial", "Comercial", "Interiores", "Consultoria", "Modelagem 3D"],
@@ -499,43 +509,75 @@ class App(ctk.CTk):
              self.entry_data.bind("<<DateEntrySelected>>", self.update_live_preview)
              self.entry_data.bind("<KeyRelease>", self.update_live_preview)
 
-        # 2. Extras
+        # 2. Extras & Discount
         f_costs = ctk.CTkFrame(self.frame_orc_form, fg_color="transparent")
         f_costs.pack(fill="x", pady=5)
 
-        ctk.CTkLabel(f_costs, text="Custos Extras (R$):", font=self.font_label).pack(anchor="w")
+        # Grid for costs
+        f_costs.columnconfigure(0, weight=1)
+        f_costs.columnconfigure(1, weight=1)
+
+        # Extras
+        lbl_extras = ctk.CTkLabel(f_costs, text="Custos Extras (R$):", font=self.font_label)
+        lbl_extras.grid(row=0, column=0, sticky="w", padx=5)
+
         self.entry_extras = ctk.CTkEntry(f_costs, height=40, placeholder_text="0.00",
                                          fg_color=self.col_card, border_width=0)
-        self.entry_extras.pack(fill="x", pady=(2, 10))
+        self.entry_extras.grid(row=1, column=0, sticky="ew", padx=5, pady=(2, 10))
         self.entry_extras.bind("<KeyRelease>", self.update_live_preview)
 
-        # 3. Services List (Scrollable)
+        # Desconto
+        lbl_desc = ctk.CTkLabel(f_costs, text="Desconto/Taxa (-10% ou +500):", font=self.font_label)
+        lbl_desc.grid(row=0, column=1, sticky="w", padx=5)
+
+        self.entry_desconto = ctk.CTkEntry(f_costs, height=40, placeholder_text="-10% ou +500",
+                                           fg_color=self.col_card, border_width=0)
+        self.entry_desconto.grid(row=1, column=1, sticky="ew", padx=5, pady=(2, 10))
+        self.entry_desconto.bind("<KeyRelease>", self.update_live_preview)
+
+
+        # 3. Services List (No longer ScrollableFrame inside ScrollableFrame to avoid scroll conflict, just Frame)
         header_frame = ctk.CTkFrame(self.frame_orc_form, fg_color="transparent")
         header_frame.pack(fill="x", pady=(10, 5))
         ctk.CTkLabel(header_frame, text="Escopo do Projeto:", font=self.font_title).pack(side="left")
         ctk.CTkButton(header_frame, text="🔄", width=30, command=self.carregar_checkboxes_tarefas,
                       fg_color=self.col_card, hover_color=self.col_bg).pack(side="right")
 
-        self.scrollable_frame = ctk.CTkScrollableFrame(self.frame_orc_form, label_text="Selecione os Serviços",
-                                                       fg_color=self.col_card, label_fg_color=self.col_bg)
+        # This frame holds checkboxes. The parent is already scrollable.
+        self.scrollable_frame = ctk.CTkFrame(self.frame_orc_form, fg_color=self.col_card)
         self.scrollable_frame.pack(fill="both", expand=True, pady=5)
 
-        # --- PREVIEW BUILD ---
+
+        # --- PREVIEW BUILD (Fixed Sidebar) ---
         ctk.CTkLabel(self.frame_orc_preview, text="Resumo do Orçamento", font=self.font_title, text_color="white").pack(pady=20)
 
+        # Hours & Days
         self.lbl_prev_horas = ctk.CTkLabel(self.frame_orc_preview, text="Horas: 0h", font=self.font_label, text_color=self.col_text_muted)
-        self.lbl_prev_horas.pack(pady=5)
+        self.lbl_prev_horas.pack(pady=2)
 
+        self.lbl_prev_dias = ctk.CTkLabel(self.frame_orc_preview, text="Previsão: 0 dias úteis", font=self.font_label, text_color="#3B82F6")
+        self.lbl_prev_dias.pack(pady=(0, 10))
+
+        # Costs
         self.lbl_prev_custo = ctk.CTkLabel(self.frame_orc_preview, text="Custo Prod: R$ 0.00", font=self.font_label, text_color=self.col_text_muted)
-        self.lbl_prev_custo.pack(pady=5)
+        self.lbl_prev_custo.pack(pady=2)
 
+        # Profit & Margin (Traffic Light)
         self.lbl_prev_lucro = ctk.CTkLabel(self.frame_orc_preview, text="Lucro Líq: R$ 0.00", font=self.font_label, text_color=self.col_text_muted)
-        self.lbl_prev_lucro.pack(pady=5)
+        self.lbl_prev_lucro.pack(pady=2)
+
+        self.lbl_prev_margem = ctk.CTkLabel(self.frame_orc_preview, text="Margem: 0% (---)", font=ctk.CTkFont(weight="bold"))
+        self.lbl_prev_margem.pack(pady=2)
 
         ctk.CTkFrame(self.frame_orc_preview, height=2, fg_color="#334155").pack(fill="x", padx=20, pady=10) # Divider
 
+        # Total
         self.lbl_prev_total = ctk.CTkLabel(self.frame_orc_preview, text="R$ 0.00", font=ctk.CTkFont(size=36, weight="bold"), text_color=self.col_success)
         self.lbl_prev_total.pack(pady=10)
+
+        # Installment Simulator
+        self.lbl_parcelamento = ctk.CTkLabel(self.frame_orc_preview, text="1x R$ 0.00 | 3x R$ 0.00", font=self.font_label, text_color=self.col_text_muted)
+        self.lbl_parcelamento.pack(pady=(0, 20))
 
         # Save Button
         ctk.CTkButton(self.frame_orc_preview, text="💾 Salvar/Gerar Projeto", command=self.finalizar_orcamento,
@@ -1268,6 +1310,12 @@ class App(ctk.CTk):
         except ValueError:
             messagebox.showerror("Erro", "Verifique os números digitados.")
 
+    def update_client_autocomplete(self):
+        # Fetch clients
+        self.db.cursor.execute("SELECT DISTINCT cliente FROM projetos ORDER BY cliente")
+        clients = [row[0] for row in self.db.cursor.fetchall()]
+        self.combo_cliente.configure(values=clients)
+
     def update_live_preview(self, _=None):
         # Coleta dados
         horas_totais = 0
@@ -1283,21 +1331,57 @@ class App(ctk.CTk):
         except:
             extras = 0.0
 
-        res = self.calc.calcular_orcamento(horas_totais, extras)
+        discount_str = self.entry_desconto.get()
+
+        res = self.calc.calcular_orcamento(horas_totais, extras, discount_str)
+        # res: valor_hora, custo_producao, preco_sugerido, preco_final, lucro_liquido_real, margem_real_pct, impostos_reais, dias_uteis
 
         # Update UI Labels
         self.lbl_prev_horas.configure(text=f"Horas: {horas_totais}h")
+        self.lbl_prev_dias.configure(text=f"Previsão: {res['dias_uteis']} dias úteis")
+
         self.lbl_prev_custo.configure(text=f"Custo Prod: R$ {res['custo_producao']:.2f}")
-        self.lbl_prev_lucro.configure(text=f"Lucro Líq: R$ {res['lucro']:.2f}")
+
+        # Lucro e Margem (Semaforo)
+        margem = res['margem_real_pct']
+        lucro_real = res['lucro_liquido_real']
+
+        self.lbl_prev_lucro.configure(text=f"Lucro Líq: R$ {lucro_real:.2f}")
+
+        color_margin = "#F59E0B" # Yellow
+        text_margin = "Atenção"
+        icon_margin = "⚠️"
+
+        if margem > 30:
+            color_margin = "#10B981" # Green
+            text_margin = "Ótimo"
+            icon_margin = "🟢"
+        elif margem < 15:
+            color_margin = "#EF4444" # Red
+            text_margin = "Perigo"
+            icon_margin = "🔴"
+
+        self.lbl_prev_margem.configure(text=f"Margem: {int(margem)}% ({text_margin}) {icon_margin}", text_color=color_margin)
+
+        # Total
         self.lbl_prev_total.configure(text=f"R$ {res['preco_final']:.2f}")
+
+        # Parcelamento
+        total = res['preco_final']
+        if total > 0:
+            p3 = total / 3
+            self.lbl_parcelamento.configure(text=f"À vista: R$ {total:.2f} | 3x de R$ {p3:.2f}")
+        else:
+            self.lbl_parcelamento.configure(text="À vista: R$ 0.00 | 3x de R$ 0.00")
 
         # Auto-save Draft
         self.save_draft(ids_selecionados)
 
     def save_draft(self, ids):
         data = {
-            "cliente": self.entry_cliente.get(),
+            "cliente": self.combo_cliente.get(),
             "extras": self.entry_extras.get(),
+            "desconto": self.entry_desconto.get(),
             "data": self.entry_data.get(),
             "servicos": ids
         }
@@ -1315,11 +1399,13 @@ class App(ctk.CTk):
             with open("draft.json", "r") as f:
                 data = json.load(f)
 
-            self.entry_cliente.delete(0, 'end')
-            self.entry_cliente.insert(0, data.get("cliente", ""))
+            self.combo_cliente.set(data.get("cliente", ""))
 
             self.entry_extras.delete(0, 'end')
             self.entry_extras.insert(0, data.get("extras", ""))
+
+            self.entry_desconto.delete(0, 'end')
+            self.entry_desconto.insert(0, data.get("desconto", ""))
 
             if hasattr(self.entry_data, 'set_date'):
                 # Try to parse date, if fail ignore
@@ -1341,9 +1427,10 @@ class App(ctk.CTk):
     def cancelar_edicao(self):
         if messagebox.askyesno("Confirmar", "Limpar todos os campos e cancelar a edição atual?"):
             self.editing_project_id = None
-            self.entry_cliente.delete(0, 'end')
+            self.combo_cliente.set("")
             self.combo_categoria.set("Residencial")
             self.entry_extras.delete(0, 'end')
+            self.entry_desconto.delete(0, 'end')
             try:
                 self.entry_data.set_date(datetime.now())
             except: pass
@@ -1382,11 +1469,12 @@ class App(ctk.CTk):
                 self.salvar_projeto(res['preco_final'], extras)
 
     def salvar_projeto(self, preco_final, extras):
-        cliente = self.entry_cliente.get()
+        cliente = self.combo_cliente.get()
         if not cliente:
             cliente = "Cliente Sem Nome"
 
         categoria = self.combo_categoria.get()
+        desconto_txt = self.entry_desconto.get()
 
         try:
             data_entrega = self.entry_data.get_date().strftime("%d/%m/%Y")
@@ -1396,9 +1484,9 @@ class App(ctk.CTk):
         now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
         self.db.cursor.execute("""
-            INSERT INTO projetos (cliente, data_criacao, data_entrega, status, custo_extras, preco_final, categoria, data_atualizacao)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        """, (cliente, datetime.now().strftime("%Y-%m-%d"), data_entrega, "Orçamento", extras, preco_final, categoria, now_str))
+            INSERT INTO projetos (cliente, data_criacao, data_entrega, status, custo_extras, preco_final, categoria, data_atualizacao, desconto_texto)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (cliente, datetime.now().strftime("%Y-%m-%d"), data_entrega, "Orçamento", extras, preco_final, categoria, now_str, desconto_txt))
 
         proj_id = self.db.cursor.lastrowid
 
@@ -1411,8 +1499,9 @@ class App(ctk.CTk):
         self._post_save_actions("Projeto Criado!")
 
     def atualizar_projeto_db(self, preco_final, extras):
-        cliente = self.entry_cliente.get()
+        cliente = self.combo_cliente.get()
         categoria = self.combo_categoria.get()
+        desconto_txt = self.entry_desconto.get()
 
         try:
             data_entrega = self.entry_data.get_date().strftime("%d/%m/%Y")
@@ -1422,9 +1511,9 @@ class App(ctk.CTk):
         now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
         self.db.cursor.execute("""
-            UPDATE projetos SET cliente=?, data_entrega=?, custo_extras=?, preco_final=?, categoria=?, data_atualizacao=?
+            UPDATE projetos SET cliente=?, data_entrega=?, custo_extras=?, preco_final=?, categoria=?, data_atualizacao=?, desconto_texto=?
             WHERE id=?
-        """, (cliente, data_entrega, extras, preco_final, categoria, now_str, self.editing_project_id))
+        """, (cliente, data_entrega, extras, preco_final, categoria, now_str, desconto_txt, self.editing_project_id))
 
         # Recreate tasks
         self.db.cursor.execute("DELETE FROM tarefas_projeto WHERE projeto_id=?", (self.editing_project_id,))
@@ -1445,15 +1534,17 @@ class App(ctk.CTk):
 
         # Reset Form and Mode
         self.editing_project_id = None
-        self.entry_cliente.delete(0, 'end')
+        self.combo_cliente.set("")
         self.combo_categoria.set("Residencial")
         self.entry_extras.delete(0, 'end')
+        self.entry_desconto.delete(0, 'end')
         try:
             self.entry_data.set_date(datetime.now())
         except: pass
 
         for var, _, _, _ in self.check_vars: var.set(False)
         self.update_live_preview()
+        self.update_client_autocomplete() # Refresh list with potentially new client
 
         # Switch Back
         self.refresh_projetos()
@@ -1468,8 +1559,7 @@ class App(ctk.CTk):
         self.editing_project_id = pid
 
         # Populate
-        self.entry_cliente.delete(0, 'end')
-        self.entry_cliente.insert(0, proj[1])
+        self.combo_cliente.set(proj[1])
 
         # Populate Category
         # proj[7] is categoria
@@ -1478,6 +1568,12 @@ class App(ctk.CTk):
 
         self.entry_extras.delete(0, 'end')
         self.entry_extras.insert(0, proj[5])
+
+        # Populate Discount
+        # Check if column exists in fetched tuple
+        if len(proj) > 9:
+             self.entry_desconto.delete(0, 'end')
+             self.entry_desconto.insert(0, proj[9])
 
         if proj[3] and hasattr(self.entry_data, 'set_date'):
             try:
