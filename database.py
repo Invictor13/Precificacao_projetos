@@ -54,7 +54,8 @@ class Database:
                 custo_extras REAL,
                 preco_final REAL,
                 categoria TEXT DEFAULT 'Geral',
-                data_atualizacao TEXT
+                data_atualizacao TEXT,
+                desconto_texto TEXT DEFAULT ''
             )
         """)
 
@@ -116,6 +117,10 @@ class Database:
             self.cursor.execute("ALTER TABLE projetos ADD COLUMN data_atualizacao TEXT")
             # Populate with data_criacao for existing records
             self.cursor.execute("UPDATE projetos SET data_atualizacao = data_criacao WHERE data_atualizacao IS NULL")
+
+        if "desconto_texto" not in cols:
+            print("Migrando DB: Adicionando coluna 'desconto_texto' em projetos...")
+            self.cursor.execute("ALTER TABLE projetos ADD COLUMN desconto_texto TEXT DEFAULT ''")
 
         self.conn.commit()
 
@@ -517,11 +522,19 @@ class Database:
         orig = self.cursor.fetchone()
         if not orig: return
 
-        # orig columns depend on the SELECT * order.
-        # Typically: id, cliente, data_criacao, data_entrega, status, custo_extras, preco_final, categoria, data_atualizacao
-        # Let's map safely by index if schema is stable, or use row_factory if available.
-        # Given create_tables order:
-        # 0:id, 1:cliente, 2:data_criacao, 3:data_entrega, 4:status, 5:custo_extras, 6:preco_final, 7:categoria, 8:data_atualizacao
+        # Get column names to be safe or map manually
+        # 0:id, 1:cliente, 2:data_criacao, 3:data_entrega, 4:status, 5:custo_extras, 6:preco_final, 7:categoria, 8:data_atualizacao, 9:desconto_texto
+        # Note: If database was migrated, order might differ (appended at end).
+        # It's safer to fetch by name if we were using a DictCursor, but here we use index.
+        # Assuming append order in check_and_migrate is respected, discount is last.
+        # But for 'orig', if we select *, the order is schema order.
+
+        # To be robust against column order changes, we should probably explicitly select columns in copy.
+        # But for now, let's assume the order: id, cliente, data_criacao, data_entrega, status, custo_extras, preco_final, categoria, data_atualizacao, desconto_texto
+
+        # Check len
+        has_discount = len(orig) > 9
+        discount_val = orig[9] if has_discount else ""
 
         new_client = orig[1] + " (Cópia)"
         now_date = datetime.datetime.now().strftime("%Y-%m-%d")
@@ -529,9 +542,9 @@ class Database:
 
         # Copy data but reset status to 'Orçamento' and update dates
         self.cursor.execute("""
-            INSERT INTO projetos (cliente, data_criacao, data_entrega, status, custo_extras, preco_final, categoria, data_atualizacao)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        """, (new_client, now_date, orig[3], "Orçamento", orig[5], orig[6], orig[7], now_ts))
+            INSERT INTO projetos (cliente, data_criacao, data_entrega, status, custo_extras, preco_final, categoria, data_atualizacao, desconto_texto)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (new_client, now_date, orig[3], "Orçamento", orig[5], orig[6], orig[7], now_ts, discount_val))
 
         new_id = self.cursor.lastrowid
 
