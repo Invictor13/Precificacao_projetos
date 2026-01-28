@@ -69,6 +69,15 @@ class Database:
                 FOREIGN KEY(projeto_id) REFERENCES projetos(id)
             )
         """)
+
+        # Tabela de Histórico de Alterações (Audit Trail)
+        self.cursor.execute("""
+            CREATE TABLE IF NOT EXISTS change_log (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp TEXT,
+                descricao TEXT
+            )
+        """)
         self.conn.commit()
 
     def check_and_migrate(self):
@@ -88,6 +97,11 @@ class Database:
             for cat, keywords in mapping.items():
                 for kw in keywords:
                     self.cursor.execute(f"UPDATE catalogo_servicos SET categoria = ? WHERE nome LIKE ?", (cat, f"%{kw}%"))
+            self.conn.commit()
+
+        if "tags" not in cols:
+            print("Migrando DB: Adicionando coluna 'tags' em catalogo_servicos...")
+            self.cursor.execute("ALTER TABLE catalogo_servicos ADD COLUMN tags TEXT DEFAULT ''")
             self.conn.commit()
 
         # Verifica colunas em 'configuracoes'
@@ -178,35 +192,103 @@ class Database:
         return self.cursor.fetchone()
 
     def update_config(self, custo, horas, imposto, lucro, meta, nome):
+        # Get old config for diff logging
+        old_cfg = self.get_config() # (id, custo, horas, imposto, lucro, meta, nome)
+
         # Verifica se já existe config
-        if self.get_config():
+        if old_cfg:
             self.cursor.execute("""
                 UPDATE configuracoes SET custo_mensal=?, horas_mensais=?, imposto_padrao=?, lucro_padrao=?, meta_mensal=?, nome_usuario=?
                 WHERE id = (SELECT MAX(id) FROM configuracoes)
             """, (custo, horas, imposto, lucro, meta, nome))
+
+            # Log changes
+            changes = []
+            if abs(old_cfg[1] - custo) > 0.01: changes.append(f"Custo Mensal: {old_cfg[1]} -> {custo}")
+            if abs(old_cfg[3] - imposto) > 0.01: changes.append(f"Imposto: {old_cfg[3]}% -> {imposto}%")
+            if abs(old_cfg[4] - lucro) > 0.01: changes.append(f"Lucro: {old_cfg[4]}% -> {lucro}%")
+
+            if changes:
+                log_msg = " | ".join(changes)
+                self.log_change(log_msg)
+
         else:
              self.cursor.execute("""
                 INSERT INTO configuracoes (custo_mensal, horas_mensais, imposto_padrao, lucro_padrao, meta_mensal, nome_usuario)
                 VALUES (?, ?, ?, ?, ?, ?)
             """, (custo, horas, imposto, lucro, meta, nome))
+             self.log_change("Configuração inicial criada.")
+
         self.conn.commit()
+
+    def log_change(self, descricao):
+        ts = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        self.cursor.execute("INSERT INTO change_log (timestamp, descricao) VALUES (?, ?)", (ts, descricao))
+        self.conn.commit()
+
+    def get_change_log(self):
+        self.cursor.execute("SELECT timestamp, descricao FROM change_log ORDER BY id DESC LIMIT 50")
+        return self.cursor.fetchall()
 
     # Métodos do Catálogo
     def get_servicos(self):
-        self.cursor.execute("SELECT id, nome, horas_padrao, categoria FROM catalogo_servicos ORDER BY categoria, nome")
+        self.cursor.execute("SELECT id, nome, horas_padrao, categoria, tags FROM catalogo_servicos ORDER BY categoria, nome")
         return self.cursor.fetchall()
 
     def get_categorias(self):
         self.cursor.execute("SELECT DISTINCT categoria FROM catalogo_servicos ORDER BY categoria")
         return [row[0] for row in self.cursor.fetchall()]
 
-    def add_servico(self, nome, horas, categoria="Geral"):
-        self.cursor.execute("INSERT INTO catalogo_servicos (nome, horas_padrao, categoria) VALUES (?, ?, ?)", (nome, horas, categoria))
+    def add_servico(self, nome, horas, categoria="Geral", tags=""):
+        self.cursor.execute("INSERT INTO catalogo_servicos (nome, horas_padrao, categoria, tags) VALUES (?, ?, ?, ?)", (nome, horas, categoria, tags))
+        self.conn.commit()
+
+    def update_servico(self, id_servico, nome, horas, categoria, tags):
+        self.cursor.execute("UPDATE catalogo_servicos SET nome=?, horas_padrao=?, categoria=?, tags=? WHERE id=?",
+                            (nome, horas, categoria, tags, id_servico))
         self.conn.commit()
 
     def delete_servico(self, id_servico):
         self.cursor.execute("DELETE FROM catalogo_servicos WHERE id=?", (id_servico,))
         self.conn.commit()
+
+    def get_service_usage_count(self, nome_servico):
+        # Checks how many tasks have this description/name
+        self.cursor.execute("SELECT COUNT(*) FROM tarefas_projeto WHERE descricao=?", (nome_servico,))
+        res = self.cursor.fetchone()
+        return res[0] if res else 0
+
+    def get_service_usage_stats(self, nome_servico):
+        # Get usage count for last months? For now, total usage.
+        # Also returns last usage date?
+        return self.get_service_usage_count(nome_servico)
+
+    def adjust_catalog_hours(self, percentage):
+        # Percentage e.g. 10.0 for +10%
+        factor = 1 + (percentage / 100.0)
+        self.cursor.execute("UPDATE catalogo_servicos SET horas_padrao = horas_padrao * ?", (factor,))
+        self.conn.commit()
+
+    def get_most_profitable_service(self):
+        # Approximated by Total Revenue generated by this service name across all projects.
+        # Revenue = Task_Hours * (Project_Final_Price / Project_Total_Hours)
+        # This requires iteration or complex SQL.
+        # Alternative: Just Sum(Hours) if rate is stable.
+        # Let's do a SQL query that joins tasks and projects.
+
+        query = """
+            SELECT t.descricao, SUM(t.horas_estimadas * (p.preco_final / NULLIF((SELECT SUM(tp.horas_estimadas) FROM tarefas_projeto tp WHERE tp.projeto_id = p.id), 0))) as receita_total
+            FROM tarefas_projeto t
+            JOIN projetos p ON t.projeto_id = p.id
+            GROUP BY t.descricao
+            ORDER BY receita_total DESC
+            LIMIT 1
+        """
+        self.cursor.execute(query)
+        res = self.cursor.fetchone()
+        if res:
+            return res[0], res[1] # Name, Total Revenue
+        return None, 0.0
 
     # Métodos de Custos Operacionais
     def get_custos_operacionais(self):
