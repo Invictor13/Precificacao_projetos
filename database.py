@@ -1,4 +1,5 @@
 import sqlite3
+import datetime
 
 class Database:
     def __init__(self, db_name="meus_projetos.db"):
@@ -50,7 +51,9 @@ class Database:
                 data_entrega TEXT,
                 status TEXT,
                 custo_extras REAL,
-                preco_final REAL
+                preco_final REAL,
+                categoria TEXT DEFAULT 'Geral',
+                data_atualizacao TEXT
             )
         """)
 
@@ -98,9 +101,20 @@ class Database:
         # Verifica colunas em 'projetos'
         self.cursor.execute("PRAGMA table_info(projetos)")
         cols = [info[1] for info in self.cursor.fetchall()]
+
         if "data_entrega" not in cols:
             print("Migrando DB: Adicionando coluna 'data_entrega' em projetos...")
             self.cursor.execute("ALTER TABLE projetos ADD COLUMN data_entrega TEXT")
+
+        if "categoria" not in cols:
+            print("Migrando DB: Adicionando coluna 'categoria' em projetos...")
+            self.cursor.execute("ALTER TABLE projetos ADD COLUMN categoria TEXT DEFAULT 'Geral'")
+
+        if "data_atualizacao" not in cols:
+            print("Migrando DB: Adicionando coluna 'data_atualizacao' em projetos...")
+            self.cursor.execute("ALTER TABLE projetos ADD COLUMN data_atualizacao TEXT")
+            # Populate with data_criacao for existing records
+            self.cursor.execute("UPDATE projetos SET data_atualizacao = data_criacao WHERE data_atualizacao IS NULL")
 
         self.conn.commit()
 
@@ -206,19 +220,22 @@ class Database:
         result = self.cursor.fetchone()[0]
         return result if result else 0.0
 
-    def get_dashboard_metrics(self, filtro_mes=None, filtro_ano=None):
+    def get_dashboard_metrics(self, filtro_mes=None, filtro_ano=None, filtro_dia=None):
         query = "SELECT COUNT(*), SUM(preco_final) FROM projetos"
         params = []
 
         where_clauses = []
         if filtro_mes and filtro_mes != "Todos":
-             # Assuming data_criacao is YYYY-MM-DD
              where_clauses.append("strftime('%m', data_criacao) = ?")
              params.append(filtro_mes)
 
         if filtro_ano and filtro_ano != "Todos":
              where_clauses.append("strftime('%Y', data_criacao) = ?")
              params.append(filtro_ano)
+
+        if filtro_dia:
+             where_clauses.append("strftime('%d', data_criacao) = ?")
+             params.append(filtro_dia)
 
         if where_clauses:
             query += " WHERE " + " AND ".join(where_clauses)
@@ -246,3 +263,205 @@ class Database:
             "ticket_medio": ticket_medio,
             "status_dist": status_dist
         }
+
+    def get_revenue_trend(self, months=6):
+        today = datetime.datetime.now()
+        labels = []
+        values = []
+
+        # Helper to subtract months
+        def subtract_months(dt, n):
+            total_months = dt.year * 12 + dt.month - 1 - n
+            year = total_months // 12
+            month = total_months % 12 + 1
+            return datetime.date(year, month, 1)
+
+        for i in range(months - 1, -1, -1):
+            d = subtract_months(today, i)
+            month_str = d.strftime("%Y-%m")
+            label_str = d.strftime("%b/%y") # Ex: Out/23
+
+            self.cursor.execute("SELECT SUM(preco_final) FROM projetos WHERE strftime('%Y-%m', data_criacao) = ?", (month_str,))
+            res = self.cursor.fetchone()
+            val = res[0] if res and res[0] else 0.0
+
+            labels.append(label_str)
+            values.append(val)
+
+        return labels, values
+
+    def get_revenue_by_category(self, filtro_mes=None, filtro_ano=None, filtro_dia=None):
+        query = "SELECT categoria, SUM(preco_final) FROM projetos"
+        params = []
+        where_clauses = []
+
+        if filtro_mes and filtro_mes != "Todos":
+             where_clauses.append("strftime('%m', data_criacao) = ?")
+             params.append(filtro_mes)
+
+        if filtro_ano and filtro_ano != "Todos":
+             where_clauses.append("strftime('%Y', data_criacao) = ?")
+             params.append(filtro_ano)
+
+        if filtro_dia:
+             where_clauses.append("strftime('%d', data_criacao) = ?")
+             params.append(filtro_dia)
+
+        if where_clauses:
+            query += " WHERE " + " AND ".join(where_clauses)
+
+        query += " GROUP BY categoria"
+
+        self.cursor.execute(query, params)
+        return self.cursor.fetchall() # [(Cat, Val), ...]
+
+    def get_conversion_rate(self, filtro_mes=None, filtro_ano=None, filtro_dia=None):
+        # Total Budgets = Count All
+        # Converted = Status != 'Orçamento' (assuming 'Orçamento' is the initial state)
+        # OR Status in ('Aprovado', 'Em Execução', 'Concluído')
+
+        base_query = "SELECT COUNT(*) FROM projetos"
+        params = []
+        where_clauses = []
+
+        if filtro_mes and filtro_mes != "Todos":
+             where_clauses.append("strftime('%m', data_criacao) = ?")
+             params.append(filtro_mes)
+
+        if filtro_ano and filtro_ano != "Todos":
+             where_clauses.append("strftime('%Y', data_criacao) = ?")
+             params.append(filtro_ano)
+
+        if filtro_dia:
+             where_clauses.append("strftime('%d', data_criacao) = ?")
+             params.append(filtro_dia)
+
+        where_str = ""
+        if where_clauses:
+            where_str = " WHERE " + " AND ".join(where_clauses)
+
+        # Total
+        self.cursor.execute(base_query + where_str, params)
+        total = self.cursor.fetchone()[0]
+        if not total: total = 0
+
+        # Converted
+        converted_clauses = list(where_clauses)
+        converted_clauses.append("status != 'Orçamento'")
+        where_converted = " WHERE " + " AND ".join(converted_clauses)
+
+        self.cursor.execute(base_query + where_converted, params)
+        converted = self.cursor.fetchone()[0]
+        if not converted: converted = 0
+
+        return total, converted
+
+    def get_stalled_projects(self, days=10):
+        # Projects not updated in X days and NOT 'Concluído'
+        # We need to be careful with date parsing.
+        # Ideally we assume data_atualizacao is sortable string YYYY-MM-DD...
+
+        limit_date = datetime.datetime.now() - datetime.timedelta(days=days)
+        # Convert to string format used in DB. Since we might have YYYY-MM-DD or YYYY-MM-DD HH:MM:SS
+        # If we use string comparison, "2023-10-01" < "2023-10-10".
+        # We need to handle that data_atualizacao might vary.
+        # But let's assume standard ISO format YYYY-MM-DD...
+
+        limit_str = limit_date.strftime("%Y-%m-%d %H:%M:%S")
+
+        # We want data_atualizacao < limit_str
+        # AND status != 'Concluído'
+
+        # Note: If data_atualizacao is YYYY-MM-DD (length 10), and limit_str is length 19, string compare still works often
+        # but "2023-10-20" < "2023-10-20 12:00:00" is true.
+
+        query = """
+            SELECT id, cliente, status, data_atualizacao
+            FROM projetos
+            WHERE status != 'Concluído'
+            AND (data_atualizacao < ? OR data_atualizacao IS NULL)
+        """
+
+        self.cursor.execute(query, (limit_str,))
+        return self.cursor.fetchall()
+
+    def get_hourly_efficiency(self, filtro_mes=None, filtro_ano=None, filtro_dia=None):
+        # 1. Calculate Real Sold Hour Value
+        # Avoid JOIN duplication by querying separately
+
+        # Total Revenue
+        query_rev = "SELECT SUM(preco_final) FROM projetos"
+        params = []
+        where_clauses = []
+
+        if filtro_mes and filtro_mes != "Todos":
+             where_clauses.append("strftime('%m', data_criacao) = ?")
+             params.append(filtro_mes)
+
+        if filtro_ano and filtro_ano != "Todos":
+             where_clauses.append("strftime('%Y', data_criacao) = ?")
+             params.append(filtro_ano)
+
+        if filtro_dia:
+             where_clauses.append("strftime('%d', data_criacao) = ?")
+             params.append(filtro_dia)
+
+        if where_clauses:
+            query_rev += " WHERE " + " AND ".join(where_clauses)
+
+        self.cursor.execute(query_rev, params)
+        res_rev = self.cursor.fetchone()
+        total_rev = res_rev[0] if res_rev and res_rev[0] else 0.0
+
+        # Total Hours
+        # We need to filter tasks by the creation date of their PROJECT.
+        query_hours = """
+            SELECT SUM(t.horas_estimadas)
+            FROM tarefas_projeto t
+            JOIN projetos p ON t.projeto_id = p.id
+        """
+        # Re-use where clauses but with 'p.' prefix if needed, but since we didn't use alias in where_clauses above,
+        # we need to be careful. 'data_criacao' exists in projects.
+        # Let's rebuild params/clauses with alias 'p'
+
+        params_h = []
+        where_h = []
+        if filtro_mes and filtro_mes != "Todos":
+             where_h.append("strftime('%m', p.data_criacao) = ?")
+             params_h.append(filtro_mes)
+
+        if filtro_ano and filtro_ano != "Todos":
+             where_h.append("strftime('%Y', p.data_criacao) = ?")
+             params_h.append(filtro_ano)
+
+        if filtro_dia:
+             where_h.append("strftime('%d', p.data_criacao) = ?")
+             params_h.append(filtro_dia)
+
+        if where_h:
+            query_hours += " WHERE " + " AND ".join(where_h)
+
+        self.cursor.execute(query_hours, params_h)
+        res_hours = self.cursor.fetchone()
+        total_hours = res_hours[0] if res_hours and res_hours[0] else 0.0
+
+        real_hourly_rate = total_rev / total_hours if total_hours > 0 else 0.0
+
+        # 2. Get Technical Cost (Calculated from Config)
+        # We need logic to calc technical cost. Logic class has it.
+        # But we are in Database class.
+        # Let's reproduce the simple calculation: Custo Mensal / Horas Mensais
+
+        cfg = self.get_config()
+        # cfg: id, custo, horas, imposto, lucro, meta, nome
+        custo_mensal = cfg[1]
+        horas_mensais = cfg[2]
+
+        # Or better, use total operational costs from table
+        custo_operacional_total = self.get_total_custos_operacionais()
+
+        # If cfg[1] (custo_mensal) is supposed to be the sum, we can use it, but logic.py uses get_total_custos_operacionais()
+
+        tech_hourly_cost = custo_operacional_total / horas_mensais if horas_mensais > 0 else 0.0
+
+        return real_hourly_rate, tech_hourly_cost

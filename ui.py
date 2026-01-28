@@ -99,12 +99,21 @@ class App(ctk.CTk):
     def create_tab_home(self):
         self.tab_home = self.tabview.tab("Home")
 
-        # Header: Greeting & Filter (Banner Style)
-        self.frame_header = ctk.CTkFrame(self.tab_home, fg_color=self.col_card, corner_radius=10)
-        self.frame_header.pack(fill="x", padx=20, pady=15)
+        # Grid Layout: Main (0) vs Sidebar (1)
+        self.tab_home.columnconfigure(0, weight=3)
+        self.tab_home.columnconfigure(1, weight=1)
+        self.tab_home.rowconfigure(0, weight=1)
+
+        # --- MAIN COLUMN ---
+        self.frame_main = ctk.CTkScrollableFrame(self.tab_home, fg_color="transparent")
+        self.frame_main.grid(row=0, column=0, sticky="nsew", padx=(0, 10), pady=10)
+
+        # 1. Header (Banner)
+        self.frame_header = ctk.CTkFrame(self.frame_main, fg_color=self.col_card, corner_radius=10)
+        self.frame_header.pack(fill="x", padx=10, pady=(0, 15))
 
         self.lbl_greeting = ctk.CTkLabel(self.frame_header, text="", font=self.font_title)
-        self.lbl_greeting.pack(side="left", padx=20, pady=15)
+        self.lbl_greeting.pack(side="left", padx=20, pady=20)
 
         self.combo_filter = ctk.CTkComboBox(self.frame_header,
                                             values=["Todos", "Este Mês", "Este Ano"],
@@ -114,36 +123,59 @@ class App(ctk.CTk):
                                             button_color=self.col_accent,
                                             button_hover_color=self.col_accent,
                                             border_color=self.col_card)
-        self.combo_filter.set("Todos")
+        self.combo_filter.set("Este Ano") # Default to year for better data view
         self.combo_filter.pack(side="right", padx=20)
 
-        # Container de Métricas
-        self.metrics_frame = ctk.CTkFrame(self.tab_home, fg_color="transparent")
-        self.metrics_frame.pack(fill="x", padx=10, pady=5)
+        # 2. Quick Actions
+        self.frame_actions = ctk.CTkFrame(self.frame_main, fg_color="transparent")
+        self.frame_actions.pack(fill="x", padx=10, pady=(0, 15))
 
-        # Container de Meta
-        self.frame_meta = ctk.CTkFrame(self.tab_home, fg_color="transparent")
-        self.frame_meta.pack(fill="x", padx=30, pady=10)
+        ctk.CTkButton(self.frame_actions, text="➕ Novo Orçamento", height=40,
+                      command=lambda: self.tabview.set("Novo Orçamento"),
+                      fg_color=self.col_accent, hover_color="#7c3aed").pack(side="left", padx=(0, 10))
 
-        self.lbl_meta_title = ctk.CTkLabel(self.frame_meta, text="Meta Mensal", font=self.font_label, text_color=self.col_text_muted)
-        self.lbl_meta_title.pack(anchor="w")
+        ctk.CTkButton(self.frame_actions, text="👤 Novo Cliente", height=40,
+                      command=lambda: (self.tabview.set("Novo Orçamento"), self.entry_cliente.focus_set()),
+                      fg_color=self.col_card, hover_color=self.col_bg).pack(side="left")
 
-        self.progress_meta = ctk.CTkProgressBar(self.frame_meta, progress_color=self.col_success, fg_color=self.col_card)
-        self.progress_meta.pack(fill="x", pady=5)
+        # 3. KPI Cards
+        self.metrics_frame = ctk.CTkFrame(self.frame_main, fg_color="transparent")
+        self.metrics_frame.pack(fill="x", padx=5, pady=(0, 15))
+        # Will be populated by update_dashboard
+
+        # 4. Meta & Gamification
+        self.frame_meta = ctk.CTkFrame(self.frame_main, fg_color=self.col_card, corner_radius=10)
+        self.frame_meta.pack(fill="x", padx=10, pady=(0, 15))
+
+        self.lbl_meta_title = ctk.CTkLabel(self.frame_meta, text="Meta Mensal (Gamification)", font=self.font_subtitle, text_color="white")
+        self.lbl_meta_title.pack(anchor="w", padx=20, pady=(15, 5))
+
+        self.progress_meta = ctk.CTkProgressBar(self.frame_meta, progress_color=self.col_success, fg_color=self.col_bg, height=15)
+        self.progress_meta.pack(fill="x", padx=20, pady=5)
         self.progress_meta.set(0)
 
-        self.lbl_meta_val = ctk.CTkLabel(self.frame_meta, text="R$ 0 / R$ 0", font=self.font_default)
-        self.lbl_meta_val.pack(anchor="e")
+        self.lbl_meta_val = ctk.CTkLabel(self.frame_meta, text="R$ 0 / R$ 0", font=self.font_label)
+        self.lbl_meta_val.pack(anchor="e", padx=20, pady=(0, 15))
 
-        # Container de Gráficos
-        self.frame_charts = ctk.CTkFrame(self.tab_home, fg_color="transparent")
-        self.frame_charts.pack(fill="both", expand=True, padx=20, pady=10)
+        # 5. Charts Area
+        self.frame_charts = ctk.CTkFrame(self.frame_main, fg_color="transparent")
+        self.frame_charts.pack(fill="both", expand=True, padx=5, pady=10)
+        # Will be populated by update_dashboard
+
+        # --- SIDEBAR COLUMN (Alerts) ---
+        self.frame_sidebar = ctk.CTkFrame(self.tab_home, fg_color=self.col_card, corner_radius=10)
+        self.frame_sidebar.grid(row=0, column=1, sticky="nsew", padx=(0, 10), pady=10)
+
+        ctk.CTkLabel(self.frame_sidebar, text="⚠️ Atenção / Alertas", font=self.font_subtitle, text_color="#EF4444").pack(padx=15, pady=20, anchor="w")
+
+        self.scroll_alerts = ctk.CTkScrollableFrame(self.frame_sidebar, fg_color="transparent")
+        self.scroll_alerts.pack(fill="both", expand=True, padx=5, pady=5)
 
         # Initial Load
         self.update_dashboard()
 
     def update_dashboard(self, _=None):
-        # 1. Update Greeting
+        # --- 1. Header & Greeting ---
         now = datetime.now()
         hour = now.hour
         greeting = "Bom dia" if 5 <= hour < 12 else "Boa tarde" if 12 <= hour < 18 else "Boa noite"
@@ -152,76 +184,150 @@ class App(ctk.CTk):
         user_name = cfg[6] if len(cfg) > 6 else "Usuário"
         meta_mensal = cfg[5] if len(cfg) > 5 else 10000.0
 
-        self.lbl_greeting.configure(text=f"{greeting}, {user_name}!")
+        self.lbl_greeting.configure(text=f"{greeting}, {user_name}! Vamos bater a meta hoje?")
 
-        # 2. Get Data based on Filter
+        # --- 2. Filter Logic ---
         filtro = self.combo_filter.get()
-        f_mes, f_ano = None, None
+        f_mes, f_ano, f_dia = None, None, None
 
         if filtro == "Este Mês":
             f_mes = now.strftime("%m")
             f_ano = now.strftime("%Y")
         elif filtro == "Este Ano":
             f_ano = now.strftime("%Y")
+        elif filtro == "Hoje":
+             f_dia = now.strftime("%d")
+             f_mes = now.strftime("%m")
+             f_ano = now.strftime("%Y")
 
-        metrics = self.db.get_dashboard_metrics(filtro_mes=f_mes, filtro_ano=f_ano)
+        # --- 3. KPIs & Metrics ---
+        metrics = self.db.get_dashboard_metrics(filtro_mes=f_mes, filtro_ano=f_ano, filtro_dia=f_dia)
+        total, converted = self.db.get_conversion_rate(filtro_mes=f_mes, filtro_ano=f_ano, filtro_dia=f_dia)
+        real_rate, tech_cost = self.db.get_hourly_efficiency(filtro_mes=f_mes, filtro_ano=f_ano, filtro_dia=f_dia)
 
-        # 3. Update Metrics Cards (Clear & Recreate)
-        for widget in self.metrics_frame.winfo_children():
-            widget.destroy()
+        # Clear KPIs
+        for w in self.metrics_frame.winfo_children(): w.destroy()
 
-        self.create_metric_card(self.metrics_frame, "Total Orçado", f"R$ {metrics['total_orcado']:.2f}", self.col_accent, 0, icon="💰")
-        self.create_metric_card(self.metrics_frame, "Projetos na Base", f"{metrics['total_projetos']}", self.col_success, 1, icon="📂")
+        # Row 1 of KPIs
+        self.create_metric_card(self.metrics_frame, "Faturamento", f"R$ {metrics['total_orcado']:.2f}", self.col_accent, 0, icon="💰")
+
+        conv_pct = (converted / total * 100) if total > 0 else 0
+        self.create_metric_card(self.metrics_frame, "Conversão", f"{converted}/{total} ({int(conv_pct)}%)", self.col_success, 1, icon="🤝")
+
         self.create_metric_card(self.metrics_frame, "Ticket Médio", f"R$ {metrics['ticket_medio']:.2f}", "#F59E0B", 2, icon="📈")
 
-        # 4. Update Meta Progress
+        # Row 2 (Efficiency) - Full width or separate
+        card_eff = ctk.CTkFrame(self.metrics_frame, fg_color=self.col_card, corner_radius=15)
+        card_eff.grid(row=1, column=0, columnspan=3, padx=10, pady=10, sticky="ew")
+
+        ctk.CTkLabel(card_eff, text="Eficiência Financeira", font=self.font_label, text_color=self.col_text_muted).pack(anchor="w", padx=15, pady=(10,0))
+        lbl_eff = ctk.CTkLabel(card_eff, text=f"Sua hora técnica custa R$ {tech_cost:.2f}, mas você vendeu a R$ {real_rate:.2f}/h",
+                               font=ctk.CTkFont(size=16, weight="bold"), text_color="white")
+        lbl_eff.pack(anchor="w", padx=15, pady=(5, 15))
+
+        # --- 4. Gamification (Meta) ---
+        # Always Monthly Goal
         metrics_month = self.db.get_dashboard_metrics(filtro_mes=now.strftime("%m"), filtro_ano=now.strftime("%Y"))
         val_month = metrics_month['total_orcado']
 
-        progress = val_month / meta_mensal if meta_mensal > 0 else 0
-        if progress > 1: progress = 1
+        pct_meta = val_month / meta_mensal if meta_mensal > 0 else 0
+        if pct_meta > 1: pct_meta = 1
 
-        self.progress_meta.set(progress)
-        self.lbl_meta_val.configure(text=f"R$ {val_month:.2f} / R$ {meta_mensal:.2f}")
+        self.progress_meta.set(pct_meta)
+        self.lbl_meta_val.configure(text=f"R$ {val_month:.2f} / R$ {meta_mensal:.2f} ({int(pct_meta*100)}%)")
 
-        # 5. Charts
-        for widget in self.frame_charts.winfo_children():
-            widget.destroy()
-
-        # Matplotlib Pie Chart (Status Distribution)
-        status_data = metrics['status_dist'] # List of tuples (status, count)
-
-        if status_data:
-            labels = [x[0] for x in status_data]
-            sizes = [x[1] for x in status_data]
-            colors_map = {
-                "Orçamento": "#F59E0B",
-                "Aprovado": self.col_success,
-                "Em Execução": "#3B82F6",
-                "Concluído": "#64748B"
-            }
-            colors_list = [colors_map.get(l, "#94A3B8") for l in labels]
-
-            fig, ax = plt.subplots(figsize=(6, 4), dpi=100)
-            fig.patch.set_facecolor(self.col_card)
-            ax.set_facecolor(self.col_card)
-
-            wedges, texts, autotexts = ax.pie(sizes, labels=labels, autopct='%1.1f%%',
-                                              startangle=90, colors=colors_list,
-                                              textprops=dict(color=self.col_text))
-
-            # Make text/autotext visible on dark
-            plt.setp(texts, color=self.col_text)
-            plt.setp(autotexts, color="white", weight="bold")
-
-            ax.axis('equal')
-            ax.set_title(f"Status dos Projetos ({filtro})", color=self.col_text, fontsize=12, weight="bold")
-
-            canvas = FigureCanvasTkAgg(fig, master=self.frame_charts)
-            canvas.draw()
-            canvas.get_tk_widget().pack(fill="both", expand=True)
+        if pct_meta >= 1:
+            self.progress_meta.configure(progress_color="#FACC15") # Gold/Celebration
+            self.lbl_meta_title.configure(text="🎉 Meta Mensal Batida! Parabéns!")
         else:
-            ctk.CTkLabel(self.frame_charts, text="Sem dados para exibir gráfico", font=self.font_label, text_color=self.col_text_muted).pack(pady=20)
+            self.progress_meta.configure(progress_color=self.col_success)
+            self.lbl_meta_title.configure(text="Meta Mensal (Gamification)")
+
+        # --- 5. Alerts (Sidebar) ---
+        for w in self.scroll_alerts.winfo_children(): w.destroy()
+
+        stalled = self.db.get_stalled_projects(days=10)
+        if not stalled:
+            ctk.CTkLabel(self.scroll_alerts, text="Nenhum alerta pendente. Tudo em ordem!", text_color=self.col_text_muted).pack(pady=20)
+        else:
+            for pid, cli, status, last_update in stalled:
+                f = ctk.CTkFrame(self.scroll_alerts, fg_color=self.col_bg, corner_radius=8)
+                f.pack(fill="x", pady=5)
+                ctk.CTkLabel(f, text=f"{cli}", font=ctk.CTkFont(weight="bold")).pack(anchor="w", padx=10, pady=(5,0))
+                ctk.CTkLabel(f, text=f"Parado há +10 dias", text_color="#EF4444", font=ctk.CTkFont(size=11)).pack(anchor="w", padx=10, pady=(0,5))
+                ctk.CTkButton(f, text="Ver", width=50, height=20, fg_color=self.col_card,
+                              command=lambda p=pid: self.ver_projeto_alerta(str(p))).pack(anchor="e", padx=5, pady=5)
+
+        # --- 6. Charts ---
+        for widget in self.frame_charts.winfo_children(): widget.destroy()
+
+        self.frame_charts.columnconfigure(0, weight=3) # Line Chart wider
+        self.frame_charts.columnconfigure(1, weight=2) # Pie Chart
+        self.frame_charts.rowconfigure(0, weight=1)
+
+        # 6.1 Line Chart (Trend)
+        labels_trend, values_trend = self.db.get_revenue_trend(months=6)
+
+        fig_line, ax_line = plt.subplots(figsize=(6, 3), dpi=100)
+        fig_line.patch.set_facecolor(self.col_card)
+        ax_line.set_facecolor(self.col_card)
+
+        ax_line.plot(labels_trend, values_trend, marker='o', color=self.col_accent, linewidth=2)
+        ax_line.fill_between(labels_trend, values_trend, color=self.col_accent, alpha=0.1)
+
+        ax_line.spines['bottom'].set_color(self.col_text)
+        ax_line.spines['left'].set_color(self.col_text)
+        ax_line.spines['top'].set_visible(False)
+        ax_line.spines['right'].set_visible(False)
+        ax_line.tick_params(axis='x', colors=self.col_text, rotation=0)
+        ax_line.tick_params(axis='y', colors=self.col_text)
+        ax_line.set_title("Faturamento - Últimos 6 Meses", color=self.col_text, weight="bold")
+
+        canvas_line = FigureCanvasTkAgg(fig_line, master=self.frame_charts)
+        canvas_line.draw()
+        canvas_line.get_tk_widget().grid(row=0, column=0, padx=5, pady=5, sticky="nsew")
+
+        # 6.2 Pie Chart (Origin)
+        cat_data = self.db.get_revenue_by_category(filtro_mes=f_mes, filtro_ano=f_ano, filtro_dia=f_dia)
+
+        fig_pie, ax_pie = plt.subplots(figsize=(4, 3), dpi=100)
+        fig_pie.patch.set_facecolor(self.col_card)
+        ax_pie.set_facecolor(self.col_card)
+
+        if cat_data:
+            cat_labels = [x[0] for x in cat_data]
+            cat_sizes = [x[1] for x in cat_data]
+            colors_cycle = ['#8b5cf6', '#10b981', '#3b82f6', '#f59e0b', '#ec4899', '#6366f1']
+
+            wedges, texts, autotexts = ax_pie.pie(cat_sizes, labels=cat_labels, autopct='%1.1f%%',
+                                                  startangle=90, colors=colors_cycle, pctdistance=0.85,
+                                                  textprops=dict(color=self.col_text))
+            centre_circle = plt.Circle((0,0),0.70,fc=self.col_card)
+            fig_pie.gca().add_artist(centre_circle)
+
+            plt.setp(texts, color=self.col_text, fontsize=9)
+            plt.setp(autotexts, color="white", weight="bold", fontsize=8)
+            ax_pie.set_title(f"Origem da Receita", color=self.col_text, weight="bold")
+        else:
+            ax_pie.text(0.5, 0.5, "Sem dados", ha='center', va='center', color=self.col_text)
+            ax_pie.set_title(f"Origem da Receita", color=self.col_text, weight="bold")
+
+        canvas_pie = FigureCanvasTkAgg(fig_pie, master=self.frame_charts)
+        canvas_pie.draw()
+        canvas_pie.get_tk_widget().grid(row=0, column=1, padx=5, pady=5, sticky="nsew")
+
+        plt.close(fig_line)
+        plt.close(fig_pie)
+
+    def ver_projeto_alerta(self, pid):
+        # Find item in treeview to select it
+        self.tabview.set("Meus Projetos")
+        for item in self.tree_proj.get_children():
+            if self.tree_proj.item(item)['values'][0] == pid:
+                self.tree_proj.selection_set(item)
+                self.tree_proj.focus(item)
+                self.tree_proj.see(item)
+                break
 
     def create_metric_card(self, parent, title, value, color, col_idx, icon="📊"):
         # Main Card Frame
@@ -348,6 +454,12 @@ class App(ctk.CTk):
                                           fg_color=self.col_card, border_width=0)
         self.entry_cliente.pack(fill="x", pady=(2, 10))
         self.entry_cliente.bind("<KeyRelease>", self.update_live_preview) # Live Update
+
+        ctk.CTkLabel(f_client, text="Categoria do Projeto:", font=self.font_label).pack(anchor="w")
+        self.combo_categoria = ctk.CTkComboBox(f_client, values=["Residencial", "Comercial", "Interiores", "Consultoria", "Modelagem 3D"],
+                                               fg_color=self.col_bg, button_color=self.col_accent, height=40)
+        self.combo_categoria.pack(fill="x", pady=(2, 10))
+        self.combo_categoria.set("Residencial")
 
         ctk.CTkLabel(f_client, text="Previsão de Entrega:", font=self.font_label).pack(anchor="w")
         try:
@@ -829,7 +941,8 @@ class App(ctk.CTk):
 
         def confirm():
             new_status = combo.get()
-            self.db.cursor.execute("UPDATE projetos SET status=? WHERE id=?", (new_status, proj_id))
+            now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            self.db.cursor.execute("UPDATE projetos SET status=?, data_atualizacao=? WHERE id=?", (new_status, now_str, proj_id))
             self.db.conn.commit()
             self.refresh_projetos()
             dialog.destroy()
@@ -1062,6 +1175,7 @@ class App(ctk.CTk):
         if messagebox.askyesno("Confirmar", "Limpar todos os campos e cancelar a edição atual?"):
             self.editing_project_id = None
             self.entry_cliente.delete(0, 'end')
+            self.combo_categoria.set("Residencial")
             self.entry_extras.delete(0, 'end')
             try:
                 self.entry_data.set_date(datetime.now())
@@ -1105,15 +1219,19 @@ class App(ctk.CTk):
         if not cliente:
             cliente = "Cliente Sem Nome"
 
+        categoria = self.combo_categoria.get()
+
         try:
             data_entrega = self.entry_data.get_date().strftime("%d/%m/%Y")
         except:
             data_entrega = ""
 
+        now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
         self.db.cursor.execute("""
-            INSERT INTO projetos (cliente, data_criacao, data_entrega, status, custo_extras, preco_final)
-            VALUES (?, ?, ?, ?, ?, ?)
-        """, (cliente, datetime.now().strftime("%Y-%m-%d"), data_entrega, "Orçamento", extras, preco_final))
+            INSERT INTO projetos (cliente, data_criacao, data_entrega, status, custo_extras, preco_final, categoria, data_atualizacao)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """, (cliente, datetime.now().strftime("%Y-%m-%d"), data_entrega, "Orçamento", extras, preco_final, categoria, now_str))
 
         proj_id = self.db.cursor.lastrowid
 
@@ -1127,15 +1245,19 @@ class App(ctk.CTk):
 
     def atualizar_projeto_db(self, preco_final, extras):
         cliente = self.entry_cliente.get()
+        categoria = self.combo_categoria.get()
+
         try:
             data_entrega = self.entry_data.get_date().strftime("%d/%m/%Y")
         except:
             data_entrega = ""
 
+        now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
         self.db.cursor.execute("""
-            UPDATE projetos SET cliente=?, data_entrega=?, custo_extras=?, preco_final=?
+            UPDATE projetos SET cliente=?, data_entrega=?, custo_extras=?, preco_final=?, categoria=?, data_atualizacao=?
             WHERE id=?
-        """, (cliente, data_entrega, extras, preco_final, self.editing_project_id))
+        """, (cliente, data_entrega, extras, preco_final, categoria, now_str, self.editing_project_id))
 
         # Recreate tasks
         self.db.cursor.execute("DELETE FROM tarefas_projeto WHERE projeto_id=?", (self.editing_project_id,))
@@ -1157,6 +1279,7 @@ class App(ctk.CTk):
         # Reset Form and Mode
         self.editing_project_id = None
         self.entry_cliente.delete(0, 'end')
+        self.combo_categoria.set("Residencial")
         self.entry_extras.delete(0, 'end')
         try:
             self.entry_data.set_date(datetime.now())
@@ -1189,6 +1312,11 @@ class App(ctk.CTk):
         self.entry_cliente.delete(0, 'end')
         self.entry_cliente.insert(0, proj[1])
 
+        # Populate Category
+        # proj[7] is categoria
+        if len(proj) > 7 and proj[7]:
+             self.combo_categoria.set(proj[7])
+
         self.entry_extras.delete(0, 'end')
         self.entry_extras.insert(0, proj[5])
 
@@ -1219,15 +1347,16 @@ class App(ctk.CTk):
 
         pid = self.tree_proj.item(selected[0])['values'][0]
 
-        self.db.cursor.execute("SELECT cliente, data_entrega, status, custo_extras, preco_final FROM projetos WHERE id=?", (pid,))
+        self.db.cursor.execute("SELECT cliente, data_entrega, status, custo_extras, preco_final, categoria FROM projetos WHERE id=?", (pid,))
         orig = self.db.cursor.fetchone()
 
         cliente_novo = orig[0] + " (Cópia)"
+        now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
         self.db.cursor.execute("""
-            INSERT INTO projetos (cliente, data_criacao, data_entrega, status, custo_extras, preco_final)
-            VALUES (?, ?, ?, ?, ?, ?)
-        """, (cliente_novo, datetime.now().strftime("%Y-%m-%d"), orig[1], "Orçamento", orig[3], orig[4]))
+            INSERT INTO projetos (cliente, data_criacao, data_entrega, status, custo_extras, preco_final, categoria, data_atualizacao)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """, (cliente_novo, datetime.now().strftime("%Y-%m-%d"), orig[1], "Orçamento", orig[3], orig[4], orig[5], now_str))
 
         new_pid = self.db.cursor.lastrowid
 
